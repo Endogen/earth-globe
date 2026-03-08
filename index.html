@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Earth Marker Studio</title>
+    <meta
+      name="description"
+      content="Professional globe-based point editor powered by FastAPI, MapLibre, and OpenStreetMap-derived vector tiles."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css" />
+    <link rel="stylesheet" href="/assets/styles/app.css" />
+    <script defer src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
+  </head>
+  <body>
+    <div class="noise"></div>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <section class="sidebar__hero">
+          <p class="eyebrow">Python Backend + MapLibre Globe</p>
+          <h1>Earth Marker Studio</h1>
+          <p class="intro">
+            Persistent globe-based OSM workspace for placing, editing, moving, and removing points with a clean FastAPI backend.
+          </p>
+        </section>
+
+        <section class="panel metrics-panel" aria-label="Overview">
+          <div class="metric-pill">
+            <span class="metric-pill__label">Projection</span>
+            <strong>Globe</strong>
+          </div>
+          <div class="metric-pill">
+            <span class="metric-pill__label">Surface</span>
+            <strong>OSM Vector</strong>
+          </div>
+          <div class="metric-pill">
+            <span class="metric-pill__label">Points</span>
+            <strong id="points-count">0</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Interaction</p>
+              <h2>Camera Controls</h2>
+            </div>
+            <p>Rotate, zoom, and frame the current working set without leaving the globe.</p>
+          </div>
+
+          <label class="toggle">
+            <span>
+              <strong>Auto-rotate</strong>
+              <small>Pause the idle globe spin when you need a static view.</small>
+            </span>
+            <input id="rotate-toggle" type="checkbox" checked />
+          </label>
+
+          <div class="button-grid">
+            <button id="center-current-location" type="button" class="button-muted">Find my location</button>
+            <button id="zoom-in" type="button">Zoom in</button>
+            <button id="zoom-out" type="button">Zoom out</button>
+            <button id="frame-points" type="button">Frame points</button>
+            <button id="reset-view" type="button">Reset view</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Editor</p>
+              <h2 id="editor-title">Add Point</h2>
+            </div>
+            <p id="editor-copy">Click the globe to prefill coordinates. Shift-click creates instantly. Click a point to edit it, drag it to move it, and Alt-click to remove it.</p>
+          </div>
+
+          <div id="editor-mode" class="editor-mode">Create mode</div>
+
+          <form id="point-form" class="point-form">
+            <label>
+              Label
+              <input id="label" name="label" type="text" maxlength="48" placeholder="Operations hub" required />
+            </label>
+            <div class="field-row">
+              <label>
+                Latitude
+                <input id="latitude" name="latitude" type="number" min="-90" max="90" step="0.0001" required />
+              </label>
+              <label>
+                Longitude
+                <input id="longitude" name="longitude" type="number" min="-180" max="180" step="0.0001" required />
+              </label>
+            </div>
+            <label>
+              Accent color
+              <input id="color" name="color" type="color" value="#ff8d57" />
+            </label>
+            <div class="form-actions">
+              <button id="submit-point" type="submit">Save point</button>
+              <button id="clear-form" type="button" class="button-muted">Clear</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel panel--stretch">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Collection</p>
+              <h2>Saved Points</h2>
+            </div>
+            <p>Edit from the list, drag points on the globe to reposition them, remove them individually, or clear the entire saved set without affecting the live current-location marker.</p>
+          </div>
+
+          <button id="clear-all-points" type="button" class="button-danger">Remove all saved points</button>
+          <p id="status" class="status" role="status">Loading configuration…</p>
+          <ul id="points-list" class="points-list"></ul>
+        </section>
+      </aside>
+
+      <section class="map-shell">
+        <div class="map-shell__header">
+          <div>
+            <p class="map-shell__eyebrow">Working View</p>
+            <h2 id="map-title">Globe loading</h2>
+          </div>
+          <div class="selection-chip" id="selection-chip">No coordinate selected</div>
+        </div>
+        <div class="map-shell__hint">Tip: click a saved point to edit it, drag the marker to move it, Alt-click to remove it, or use Find my location to show and center your live position.</div>
+        <div id="map" class="map-canvas" aria-label="Interactive world map"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/assets/js/main.js"></script>
+  </body>
+</html>

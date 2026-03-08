@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "earth-marker-studio"
+version = "0.1.0"
+description = "Python backend and MapLibre frontend for a globe-based OSM point editor"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.135,<0.136",
+  "uvicorn[standard]>=0.41,<0.42"
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
