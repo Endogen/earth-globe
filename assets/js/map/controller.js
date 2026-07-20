@@ -1,5 +1,12 @@
 import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js";
 import { currentLocationToFeatureCollection, emptyFeatureCollection, pointsToFeatureCollection } from "./geojson.js";
+import {
+  drawSolarTexture,
+  getSolarElevation,
+  getSolarPosition,
+  SOLAR_TEXTURE_HEIGHT,
+  SOLAR_TEXTURE_WIDTH
+} from "./solar.js";
 
 const SOURCE_ID = "points";
 const HALO_LAYER_ID = "points-halo";
@@ -10,6 +17,23 @@ const CURRENT_LOCATION_SOURCE_ID = "current-location";
 const CURRENT_LOCATION_HALO_LAYER_ID = "current-location-halo";
 const CURRENT_LOCATION_CORE_LAYER_ID = "current-location-core";
 const CURRENT_LOCATION_LABEL_LAYER_ID = "current-location-label";
+const SOLAR_SOURCE_ID = "solar-illumination";
+const SOLAR_SHADE_LAYER_ID = "solar-shade";
+const SOLAR_CANVAS_ID = "solar-illumination-canvas";
+const MERCATOR_MAX_LATITUDE = 85.05112878;
+
+function interpolateColor(from, to, amount) {
+  const safeAmount = Math.min(1, Math.max(0, amount));
+  const channel = (start, end) => Math.round(start + (end - start) * safeAmount);
+  const fromChannels = from.match(/[\da-f]{2}/gi).map((value) => Number.parseInt(value, 16));
+  const toChannels = to.match(/[\da-f]{2}/gi).map((value) => Number.parseInt(value, 16));
+  return `rgb(${fromChannels.map((value, index) => channel(value, toChannels[index])).join(", ")})`;
+}
+
+function smoothStep(minimum, maximum, value) {
+  const position = Math.min(1, Math.max(0, (value - minimum) / (maximum - minimum)));
+  return position * position * (3 - 2 * position);
+}
 
 export function getWrappedPointCoordinates(points) {
   if (points.length < 2) {
@@ -63,6 +87,9 @@ export class MapController {
     this.dragState = null;
     this.suppressNextMapClick = false;
     this.currentLocation = null;
+    this.solarPosition = getSolarPosition();
+    this.solarCanvas = null;
+    this.solarTextureFrame = null;
   }
 
   async mount(config) {
@@ -100,15 +127,6 @@ export class MapController {
 
     this.map.on("style.load", () => {
       this.map.setProjection({ type: "globe" });
-      if (typeof this.map.setFog === "function") {
-        this.map.setFog({
-          color: "rgba(13, 24, 40, 0.95)",
-          "high-color": "rgba(10, 18, 30, 0.75)",
-          "horizon-blend": 0.14,
-          "space-color": "rgba(2, 7, 12, 1)",
-          "star-intensity": 0.15
-        });
-      }
     });
 
     await new Promise((resolve, reject) => {
@@ -116,9 +134,11 @@ export class MapController {
       this.map.once("error", (event) => reject(event.error ?? new Error("Map failed to load")));
     });
 
+    this.#installSolarLayers();
     this.#installPointLayers();
     this.#installCurrentLocationLayers();
     this.#bindMapInteractions();
+    this.#updateAtmosphere();
     this.startRotation();
   }
 
@@ -135,6 +155,13 @@ export class MapController {
   setCurrentLocation(location) {
     this.currentLocation = location;
     this.#setCurrentLocationData(location);
+  }
+
+  setSolarDate(value) {
+    this.solarPosition = getSolarPosition(value);
+    this.#updateSolarTexture();
+    this.#updateAtmosphere();
+    return this.solarPosition;
   }
 
   zoomIn() {
@@ -242,8 +269,66 @@ export class MapController {
   destroy() {
     window.clearTimeout(this.rotationTimer);
     window.clearTimeout(this.resumeTimer);
+    window.cancelAnimationFrame(this.solarTextureFrame);
     this.popup?.remove();
     this.map?.remove();
+    this.solarCanvas?.remove();
+  }
+
+  #installSolarLayers() {
+    document.getElementById(SOLAR_CANVAS_ID)?.remove();
+    this.solarCanvas = document.createElement("canvas");
+    this.solarCanvas.id = SOLAR_CANVAS_ID;
+    this.solarCanvas.width = SOLAR_TEXTURE_WIDTH;
+    this.solarCanvas.height = SOLAR_TEXTURE_HEIGHT;
+    this.solarCanvas.hidden = true;
+    document.body.append(this.solarCanvas);
+    drawSolarTexture(this.solarCanvas, this.solarPosition);
+
+    this.map.addSource(SOLAR_SOURCE_ID, {
+      type: "canvas",
+      canvas: SOLAR_CANVAS_ID,
+      animate: false,
+      coordinates: [
+        [-180, MERCATOR_MAX_LATITUDE],
+        [180, MERCATOR_MAX_LATITUDE],
+        [180, -MERCATOR_MAX_LATITUDE],
+        [-180, -MERCATOR_MAX_LATITUDE]
+      ]
+    });
+
+    const firstSymbolLayer = this.map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
+    this.map.addLayer(
+      {
+        id: SOLAR_SHADE_LAYER_ID,
+        type: "raster",
+        source: SOLAR_SOURCE_ID,
+        paint: {
+          "raster-opacity": 1,
+          "raster-fade-duration": 0,
+          "raster-resampling": "linear"
+        }
+      },
+      firstSymbolLayer
+    );
+  }
+
+  #updateSolarTexture() {
+    if (!this.solarCanvas) {
+      return;
+    }
+
+    drawSolarTexture(this.solarCanvas, this.solarPosition);
+    const source = this.map?.getSource(SOLAR_SOURCE_ID);
+    if (!source || typeof source.play !== "function") {
+      this.map?.triggerRepaint();
+      return;
+    }
+
+    window.cancelAnimationFrame(this.solarTextureFrame);
+    source.play();
+    this.map.triggerRepaint();
+    this.solarTextureFrame = window.requestAnimationFrame(() => source.pause());
   }
 
   #installPointLayers() {
@@ -454,6 +539,7 @@ export class MapController {
     });
 
     this.map.on("moveend", () => {
+      this.#updateAtmosphere();
       window.clearTimeout(this.resumeTimer);
       this.resumeTimer = window.setTimeout(() => {
         if (!this.dragState) {
@@ -474,6 +560,41 @@ export class MapController {
     const source = this.map?.getSource(CURRENT_LOCATION_SOURCE_ID);
     if (source) {
       source.setData(currentLocationToFeatureCollection(location));
+    }
+  }
+
+  #updateAtmosphere() {
+    if (!this.map || !this.solarPosition) {
+      return;
+    }
+
+    const center = this.map.getCenter();
+    const solarElevation = getSolarElevation(this.solarPosition, center.lat, center.lng);
+    const daylight = smoothStep(-12, 6, solarElevation);
+    const horizonColor = interpolateColor("#071225", "#8ec9de", daylight);
+    const fogColor = interpolateColor("#07101e", "#c4e3e9", daylight);
+
+    if (typeof this.map.setSky === "function") {
+      this.map.setSky({
+        "sky-color": "#020711",
+        "horizon-color": horizonColor,
+        "fog-color": fogColor,
+        "sky-horizon-blend": 0.18,
+        "horizon-fog-blend": 0.72,
+        "fog-ground-blend": 0.42,
+        "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0]
+      });
+      return;
+    }
+
+    if (typeof this.map.setFog === "function") {
+      this.map.setFog({
+        color: fogColor,
+        "high-color": horizonColor,
+        "horizon-blend": 0.14,
+        "space-color": "#020711",
+        "star-intensity": 0.45 - daylight * 0.37
+      });
     }
   }
 

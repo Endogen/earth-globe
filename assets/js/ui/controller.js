@@ -1,8 +1,26 @@
 import { formatCoordinate, formatCoordinates, formatTimestamp } from "../utils/formatters.js";
 
+const UTC_DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC"
+});
+
+function formatUtcTime(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(remainingMinutes).padStart(2, "0")} UTC`;
+}
+
+function formatSolarCoordinate(value, positive, negative) {
+  const direction = value >= 0 ? positive : negative;
+  return `${Math.abs(value).toFixed(1)}° ${direction}`;
+}
+
 export class UiController {
   constructor() {
     this.appReady = false;
+    this.solarLive = true;
     this.elements = {
       form: document.getElementById("point-form"),
       label: document.getElementById("label"),
@@ -26,7 +44,16 @@ export class UiController {
       editorCopy: document.getElementById("editor-copy"),
       editorMode: document.getElementById("editor-mode"),
       submitPoint: document.getElementById("submit-point"),
-      clearAllPoints: document.getElementById("clear-all-points")
+      clearAllPoints: document.getElementById("clear-all-points"),
+      solarLiveToggle: document.getElementById("solar-live-toggle"),
+      solarSimulationControls: document.getElementById("solar-simulation-controls"),
+      solarDate: document.getElementById("solar-date"),
+      solarTimeSlider: document.getElementById("solar-time-slider"),
+      solarTimeOutput: document.getElementById("solar-time-output"),
+      solarModeLabel: document.getElementById("solar-mode-label"),
+      solarClock: document.getElementById("solar-clock"),
+      solarPosition: document.getElementById("solar-position"),
+      solarNow: document.getElementById("solar-now")
     };
     this.#syncColorValue();
   }
@@ -42,7 +69,10 @@ export class UiController {
     onFramePoints,
     onResetView,
     onClearForm,
-    onClearAllPoints
+    onClearAllPoints,
+    onSolarLiveToggle,
+    onSolarSimulationChange,
+    onSolarNow
   }) {
     this.elements.form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -103,6 +133,17 @@ export class UiController {
       }
     });
     this.elements.color.addEventListener("input", () => this.#syncColorValue());
+    this.elements.solarLiveToggle.addEventListener("change", () => {
+      this.solarLive = this.elements.solarLiveToggle.checked;
+      this.#syncSolarControlState();
+      onSolarLiveToggle(this.solarLive);
+    });
+    this.elements.solarDate.addEventListener("change", onSolarSimulationChange);
+    this.elements.solarTimeSlider.addEventListener("input", () => {
+      this.#syncSolarTimeOutput();
+      onSolarSimulationChange();
+    });
+    this.elements.solarNow.addEventListener("click", onSolarNow);
   }
 
   getFormPayload(overrides = {}) {
@@ -240,6 +281,38 @@ export class UiController {
     this.elements.selectionChip.textContent = value;
   }
 
+  getSolarSimulationDate() {
+    const dateValue = this.elements.solarDate.value;
+    const minutes = Number(this.elements.solarTimeSlider.value);
+    if (!dateValue || !Number.isFinite(minutes)) {
+      return null;
+    }
+
+    const midnight = new Date(`${dateValue}T00:00:00.000Z`);
+    if (Number.isNaN(midnight.getTime())) {
+      return null;
+    }
+    return new Date(midnight.getTime() + minutes * 60_000);
+  }
+
+  setSolarState({ date, position, live }) {
+    this.solarLive = live;
+    this.elements.solarLiveToggle.checked = live;
+    this.elements.solarModeLabel.textContent = live ? "Live solar time" : "Simulated solar time";
+    this.elements.solarModeLabel.dataset.mode = live ? "live" : "simulation";
+    this.elements.solarClock.dateTime = date.toISOString();
+    this.elements.solarClock.textContent = `${UTC_DATE_TIME_FORMATTER.format(date)} UTC`;
+    this.elements.solarPosition.textContent = `Sun over ${formatSolarCoordinate(
+      position.latitude,
+      "N",
+      "S"
+    )} · ${formatSolarCoordinate(position.longitude, "E", "W")}`;
+    this.elements.solarDate.value = date.toISOString().slice(0, 10);
+    this.elements.solarTimeSlider.value = String(date.getUTCHours() * 60 + date.getUTCMinutes());
+    this.#syncSolarTimeOutput();
+    this.#syncSolarControlState();
+  }
+
   setAppReady(ready) {
     this.appReady = ready;
     [
@@ -254,11 +327,13 @@ export class UiController {
       this.elements.longitude,
       this.elements.color,
       this.elements.submitPoint,
-      this.elements.clearForm
+      this.elements.clearForm,
+      this.elements.solarLiveToggle
     ].forEach((control) => {
       control.disabled = !ready;
     });
     this.elements.clearAllPoints.disabled = !ready || Number(this.elements.pointsCount.textContent) === 0;
+    this.#syncSolarControlState();
   }
 
   setFormBusy(busy) {
@@ -273,7 +348,13 @@ export class UiController {
         : "Save point";
   }
 
-  setCurrentLocationButtonState({ disabled = false, busy = false, available = false, message = "" } = {}) {
+  setCurrentLocationButtonState({
+    disabled = false,
+    busy = false,
+    available = false,
+    failed = false,
+    message = ""
+  } = {}) {
     this.elements.centerCurrentLocation.disabled = disabled || busy;
     this.elements.centerCurrentLocation.textContent = busy
       ? "Locating…"
@@ -281,11 +362,26 @@ export class UiController {
         ? "Center on my location"
         : disabled
           ? "Location unavailable"
-          : "Find my location";
+          : failed
+            ? "Try location again"
+            : "Find my location";
     this.elements.centerCurrentLocation.title = message;
   }
 
   #syncColorValue() {
     this.elements.colorValue.value = this.elements.color.value.toUpperCase();
+  }
+
+  #syncSolarControlState() {
+    const simulationDisabled = !this.appReady || this.solarLive;
+    this.elements.solarLiveToggle.disabled = !this.appReady;
+    this.elements.solarDate.disabled = simulationDisabled;
+    this.elements.solarTimeSlider.disabled = simulationDisabled;
+    this.elements.solarNow.disabled = simulationDisabled;
+    this.elements.solarSimulationControls.dataset.disabled = String(simulationDisabled);
+  }
+
+  #syncSolarTimeOutput() {
+    this.elements.solarTimeOutput.value = formatUtcTime(Number(this.elements.solarTimeSlider.value));
   }
 }

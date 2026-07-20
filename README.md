@@ -4,6 +4,8 @@ Professional globe-based point editor with:
 
 - Python backend using FastAPI
 - MapLibre GL JS front end with globe projection
+- astronomically accurate live day/night terminator with a smooth solar-elevation twilight gradient
+- UTC date and time simulation controls for exploring seasonal daylight
 - OSM-derived vector map styling via OpenFreeMap
 - persisted point storage in `data/points.json`
 - add, edit, move, and remove point workflows from both the map and the side panel
@@ -113,6 +115,7 @@ curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
 - Alt-click a point on the globe or use the remove action in the list to delete it
 - Use `Remove all saved points` to clear the persisted collection in one action
 - Toggle auto-rotate on or off from the control panel
+- Keep `Live time` enabled to follow the current Sun position, or disable it to simulate another UTC date and time
 
 ## Notes
 
@@ -121,4 +124,5 @@ curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
 - Browser geolocation generally requires `https` or `localhost`; insecure remote `http` access may not allow the current-location feature.
 - Location access is requested only after selecting `Find my location`.
 - Attribution is shown in the map UI for OpenFreeMap and OpenStreetMap contributors.
+- Solar calculations run locally in the browser and require no external astronomy service.
 - Writes to `data/points.json` use an atomic replace so interrupted writes cannot leave a partially written JSON document.

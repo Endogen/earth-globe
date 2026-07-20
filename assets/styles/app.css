@@ -225,6 +225,61 @@ button {
   gap: 0.2rem;
 }
 
+.solar-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.9rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(255, 194, 124, 0.14);
+  border-radius: 0.95rem;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(255, 177, 92, 0.12), transparent 42%),
+    rgba(1, 8, 16, 0.55);
+}
+
+.solar-summary > div:last-child {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.solar-disc {
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 35%, #fff4c7 0 9%, #ffc46f 42%, #ff8e52 74%);
+  box-shadow: 0 0 0 0.32rem rgba(255, 177, 92, 0.08), 0 0 1.25rem rgba(255, 164, 83, 0.35);
+}
+
+.solar-mode {
+  color: #ffc88a;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.solar-mode[data-mode="simulation"] {
+  color: var(--accent-2);
+}
+
+.solar-clock {
+  overflow: hidden;
+  color: var(--text-main);
+  font-size: 0.94rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solar-position {
+  color: var(--text-soft);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.69rem;
+}
+
 .toggle {
   display: flex;
   justify-content: space-between;
@@ -273,6 +328,47 @@ button {
 .toggle input:checked::before {
   background: var(--accent-2);
   transform: translateX(1.18rem);
+}
+
+.simulation-controls {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.75rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.025);
+  transition: opacity 140ms ease;
+}
+
+.simulation-controls[data-disabled="true"] {
+  opacity: 0.48;
+}
+
+.simulation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.simulation-grid output {
+  display: flex;
+  align-items: center;
+  min-height: 2.55rem;
+  color: var(--text-main);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.76rem;
+}
+
+.time-slider {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent-2);
+}
+
+.simulation-controls button {
+  width: 100%;
 }
 
 .editor-mode {
@@ -331,6 +427,7 @@ label {
 
 input[type="text"],
 input[type="number"],
+input[type="date"],
 input[type="color"] {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -341,8 +438,14 @@ input[type="color"] {
 }
 
 input[type="number"],
-input[type="text"] {
+input[type="text"],
+input[type="date"] {
   font-family: "IBM Plex Mono", monospace;
+}
+
+input[type="date"] {
+  min-width: 0;
+  color-scheme: dark;
 }
 
 input[type="color"] {

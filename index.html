@@ -58,6 +58,58 @@
           </div>
         </section>
 
+        <section class="panel solar-panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Astronomical light</p>
+              <h2>Day &amp; Night</h2>
+            </div>
+            <p>Follow the real Sun, or explore how daylight moves across the globe at another UTC time.</p>
+          </div>
+
+          <div class="solar-summary" aria-live="polite">
+            <div class="solar-disc" aria-hidden="true"></div>
+            <div>
+              <span id="solar-mode-label" class="solar-mode">Live solar time</span>
+              <time id="solar-clock">Calculating…</time>
+              <span id="solar-position" class="solar-position">Locating the Sun…</span>
+            </div>
+          </div>
+
+          <label class="toggle">
+            <span>
+              <strong>Live time</strong>
+              <small>Update the terminator and twilight gradient from the current clock.</small>
+            </span>
+            <input id="solar-live-toggle" type="checkbox" checked disabled />
+          </label>
+
+          <div id="solar-simulation-controls" class="simulation-controls" data-disabled="true">
+            <div class="simulation-grid">
+              <label>
+                UTC date
+                <input id="solar-date" type="date" disabled />
+              </label>
+              <label>
+                UTC time
+                <output id="solar-time-output" for="solar-time-slider">00:00 UTC</output>
+              </label>
+            </div>
+            <input
+              id="solar-time-slider"
+              class="time-slider"
+              type="range"
+              min="0"
+              max="1439"
+              step="1"
+              value="720"
+              aria-label="Simulated UTC time"
+              disabled
+            />
+            <button id="solar-now" type="button" class="button-muted" disabled>Return to live time</button>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="section-heading">
             <div>

@@ -15,6 +15,8 @@ let appConfig = null;
 let currentPoints = [];
 let editingPointId = null;
 let currentLocation = null;
+let solarLive = true;
+let solarTimer = null;
 
 const mapController = new MapController({
   containerId: "map",
@@ -88,6 +90,23 @@ ui.bind({
   },
   onClearAllPoints: async () => {
     await clearAllPoints();
+  },
+  onSolarLiveToggle: (enabled) => {
+    setSolarLive(enabled);
+    ui.setStatus(
+      enabled
+        ? "Following the current Sun position and updating once a minute."
+        : "Solar simulation enabled. Choose a UTC date and time to move the terminator."
+    );
+  },
+  onSolarSimulationChange: () => {
+    if (!solarLive) {
+      updateSolarCycle(ui.getSolarSimulationDate());
+    }
+  },
+  onSolarNow: () => {
+    setSolarLive(true);
+    ui.setStatus("Returned to the live astronomical day and night cycle.", "success");
   }
 });
 
@@ -115,6 +134,7 @@ async function bootstrap() {
 
   await mapController.mount(mapConfig);
   mapController.setPoints(currentPoints);
+  setSolarLive(true);
   bindLocationUpdates();
   ui.setAppReady(true);
   ui.setCurrentLocationButtonState({
@@ -129,6 +149,40 @@ async function bootstrap() {
       : "Map ready. Select a coordinate or add a saved point to begin.",
     "success"
   );
+}
+
+function updateSolarCycle(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    ui.setStatus("Choose a valid UTC date and time for the solar simulation.", "error");
+    return;
+  }
+
+  const position = mapController.setSolarDate(date);
+  ui.setSolarState({ date: position.date, position, live: solarLive });
+}
+
+function setSolarLive(enabled) {
+  solarLive = enabled;
+  window.clearTimeout(solarTimer);
+
+  if (!enabled) {
+    updateSolarCycle(ui.getSolarSimulationDate() ?? new Date());
+    return;
+  }
+
+  updateSolarCycle(new Date());
+  scheduleSolarUpdate();
+}
+
+function scheduleSolarUpdate() {
+  const millisecondsUntilNextMinute = 60_000 - (Date.now() % 60_000) + 50;
+  solarTimer = window.setTimeout(() => {
+    if (!solarLive) {
+      return;
+    }
+    updateSolarCycle(new Date());
+    scheduleSolarUpdate();
+  }, millisecondsUntilNextMinute);
 }
 
 function validatePayload(payload) {
@@ -252,7 +306,8 @@ function bindLocationUpdates() {
       ui.setCurrentLocationButtonState({
         disabled: !locationService.isSupported() || !locationService.isSecureContext(),
         available: false,
-        message: getLocationUnavailableMessage()
+        failed: true,
+        message: event.detail.message
       });
     }
     console.warn(event.detail);
@@ -277,7 +332,8 @@ async function startLocationTracking({ reportErrors, showBusy }) {
     ui.setCurrentLocationButtonState({
       disabled: !locationService.isSupported() || !locationService.isSecureContext(),
       available: false,
-      message: getLocationUnavailableMessage()
+      failed: true,
+      message: error.message || getLocationUnavailableMessage()
     });
     if (reportErrors) {
       ui.setStatus(error.message || "Current location is unavailable.", "error");
@@ -337,6 +393,7 @@ function getLocationUnavailableMessage() {
 }
 
 globalThis.addEventListener("beforeunload", () => {
+  window.clearTimeout(solarTimer);
   locationService.stopTracking();
   mapController.destroy();
 });

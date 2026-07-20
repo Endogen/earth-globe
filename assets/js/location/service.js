@@ -1,11 +1,13 @@
-function buildLocationError(error) {
+export function buildLocationError(error) {
   switch (error?.code) {
     case 1:
-      return new Error("Location permission was denied by the browser.");
+      return new Error("Location access is blocked. Allow it for this site and browser, then try again.");
     case 2:
-      return new Error("The browser could not determine the current location.");
+      return new Error(
+        "Your device could not provide a location. Check system Location Services and Wi-Fi, then try again."
+      );
     case 3:
-      return new Error("The location request timed out.");
+      return new Error("The location request timed out. Check Location Services or try again.");
     default:
       return new Error(error?.message || "Current location is unavailable.");
   }
@@ -65,9 +67,9 @@ export class LocationService extends EventTarget {
         (position) => this.#handleSuccess(position),
         (error) => this.#handleError(error),
         {
-          enableHighAccuracy: true,
-          maximumAge: 30_000,
-          timeout: 15_000,
+          enableHighAccuracy: false,
+          maximumAge: 300_000,
+          timeout: 20_000,
           ...options
         }
       );
