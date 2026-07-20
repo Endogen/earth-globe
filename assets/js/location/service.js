@@ -33,6 +33,14 @@ export class LocationService extends EventTarget {
     return this.currentLocation ? { ...this.currentLocation } : null;
   }
 
+  stopTracking() {
+    if (this.watchId !== null && this.isSupported()) {
+      globalThis.navigator.geolocation.clearWatch(this.watchId);
+    }
+    this.watchId = null;
+    this.#clearPendingFirstFix();
+  }
+
   async ensureTracking(options = {}) {
     const availabilityError = this.#getAvailabilityError();
     if (availabilityError) {

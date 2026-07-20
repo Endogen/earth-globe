@@ -8,6 +8,9 @@ Professional globe-based point editor with:
 - persisted point storage in `data/points.json`
 - add, edit, move, and remove point workflows from both the map and the side panel
 - modular frontend and backend code instead of a single browser script
+- atomic JSON persistence and validated API payloads
+- responsive desktop/mobile controls with reduced-motion support
+- Python API tests and JavaScript utility tests
 
 ## Stack
 
@@ -27,28 +30,42 @@ Professional globe-based point editor with:
 │   └── points.json
 ├── src/
 │   └── earth_globe_demo/
+├── tests/
+│   ├── js/
+│   └── test_*.py
 ├── index.html
+├── package.json
 ├── pyproject.toml
+├── uv.lock
 └── README.md
 ```
 
 ## Run locally
 
-Install dependencies:
+Install the locked Python dependencies, including the development tools:
 
 ```bash
-cd /home/endogen/earth-globe-demo
-python3 -m pip install -e .
+cd earth-globe
+uv sync --dev
 ```
 
 Start the app:
 
 ```bash
-cd /home/endogen/earth-globe-demo
-python3 -m uvicorn earth_globe_demo.main:app --reload --host 0.0.0.0 --port 8132
+uv run uvicorn earth_globe_demo.main:app --reload --host 127.0.0.1 --port 8132
 ```
 
-Then open `http://127.0.0.1:8132` on the server itself.
+Then open `http://127.0.0.1:8132`.
+
+To expose the app beyond your machine, choose the host and network controls deliberately; the default command binds only to localhost.
+
+## Quality checks
+
+```bash
+uv run ruff check src tests
+uv run pytest
+npm test
+```
 
 ## API
 
@@ -102,5 +119,6 @@ curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
 - The backend serves both the API and the frontend assets.
 - Point data persists in `data/points.json`.
 - Browser geolocation generally requires `https` or `localhost`; insecure remote `http` access may not allow the current-location feature.
+- Location access is requested only after selecting `Find my location`.
 - Attribution is shown in the map UI for OpenFreeMap and OpenStreetMap contributors.
-- Tailscale `serve` and `funnel` are disabled by tailnet policy on this node, so remote access currently uses the node's Tailscale IP / MagicDNS hostname directly.
+- Writes to `data/points.json` use an atomic replace so interrupted writes cannot leave a partially written JSON document.

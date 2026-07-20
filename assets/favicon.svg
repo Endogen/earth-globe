@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Earth Marker Studio">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17344d"/>
+      <stop offset="1" stop-color="#0a1421"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="16" y1="14" x2="48" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#69d5ff"/>
+      <stop offset="1" stop-color="#ff9b67"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#bg)"/>
+  <circle cx="32" cy="32" r="18" fill="none" stroke="url(#ring)" stroke-width="4"/>
+  <path d="M14 32h36M32 14c6 6 9 12 9 18s-3 12-9 18c-6-6-9-12-9-18s3-12 9-18Z" fill="none" stroke="#dff7ff" stroke-width="2" stroke-linecap="round" opacity=".8"/>
+  <circle cx="42" cy="23" r="4" fill="#ff9b67" stroke="#fff3e9" stroke-width="2"/>
+</svg>

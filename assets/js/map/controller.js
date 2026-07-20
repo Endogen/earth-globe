@@ -1,4 +1,4 @@
-import { escapeHtml, formatCoordinates } from "../utils/formatters.js";
+import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js";
 import { currentLocationToFeatureCollection, emptyFeatureCollection, pointsToFeatureCollection } from "./geojson.js";
 
 const SOURCE_ID = "points";
@@ -10,6 +10,36 @@ const CURRENT_LOCATION_SOURCE_ID = "current-location";
 const CURRENT_LOCATION_HALO_LAYER_ID = "current-location-halo";
 const CURRENT_LOCATION_CORE_LAYER_ID = "current-location-core";
 const CURRENT_LOCATION_LABEL_LAYER_ID = "current-location-label";
+
+export function getWrappedPointCoordinates(points) {
+  if (points.length < 2) {
+    return points.map((point) => [normalizeLongitude(point.longitude), point.latitude]);
+  }
+
+  const sortedLongitudes = points
+    .map((point) => normalizeLongitude(point.longitude))
+    .sort((left, right) => left - right);
+  let largestGap = -1;
+  let gapStartIndex = 0;
+
+  sortedLongitudes.forEach((longitude, index) => {
+    const nextLongitude = index === sortedLongitudes.length - 1 ? sortedLongitudes[0] + 360 : sortedLongitudes[index + 1];
+    const gap = nextLongitude - longitude;
+    if (gap > largestGap) {
+      largestGap = gap;
+      gapStartIndex = index;
+    }
+  });
+
+  const intervalStart = sortedLongitudes[(gapStartIndex + 1) % sortedLongitudes.length];
+  return points.map((point) => {
+    let longitude = normalizeLongitude(point.longitude);
+    if (longitude < intervalStart) {
+      longitude += 360;
+    }
+    return [longitude, point.latitude];
+  });
+}
 
 export class MapController {
   constructor({ containerId, onCoordinatePick, onQuickAddRequest, onPointSelect, onPointMoveRequest, onPointRemoveRequest }) {
@@ -29,6 +59,7 @@ export class MapController {
     this.rotationTimer = null;
     this.resumeTimer = null;
     this.popup = null;
+    this.popupPointId = null;
     this.dragState = null;
     this.suppressNextMapClick = false;
     this.currentLocation = null;
@@ -94,6 +125,7 @@ export class MapController {
   setPoints(points) {
     this.points = points;
     this.#setSourceData(points);
+    this.#syncPopup();
   }
 
   setRotationEnabled(enabled) {
@@ -138,7 +170,7 @@ export class MapController {
     }
 
     const bounds = new window.maplibregl.LngLatBounds();
-    points.forEach((point) => bounds.extend([point.longitude, point.latitude]));
+    getWrappedPointCoordinates(points).forEach((coordinates) => bounds.extend(coordinates));
     this.map.fitBounds(bounds, { padding: 90, duration: 900, maxZoom: 14.5 });
   }
 
@@ -155,14 +187,15 @@ export class MapController {
     });
 
     this.popup?.remove();
+    this.popupPointId = point.id;
     this.popup = new window.maplibregl.Popup({ offset: 18 })
       .setLngLat([point.longitude, point.latitude])
-      .setHTML(
-        `<strong>${escapeHtml(point.label)}</strong><br /><span>${escapeHtml(
-          formatCoordinates(point.latitude, point.longitude)
-        )}</span>`
-      )
+      .setHTML(this.#popupHtml(point))
       .addTo(this.map);
+    this.popup.on("close", () => {
+      this.popup = null;
+      this.popupPointId = null;
+    });
   }
 
   centerOnCurrentLocation() {
@@ -321,14 +354,22 @@ export class MapController {
       }
 
       const features = this.map.queryRenderedFeatures(event.point, { layers: INTERACTIVE_LAYERS });
-      if (features.length > 0) {
+      const point = this.#pointFromFeatures(features);
+      if (point) {
+        if (event.originalEvent?.altKey) {
+          this.onPointRemoveRequest?.(point.id);
+          return;
+        }
+
+        this.focusPoint(point);
+        this.onPointSelect?.(point);
         return;
       }
 
-      const draft = {
+      const draft = normalizeCoordinates({
         latitude: event.lngLat.lat,
         longitude: event.lngLat.lng
-      };
+      });
 
       this.onCoordinatePick?.(draft);
       if (event.originalEvent?.shiftKey) {
@@ -349,24 +390,6 @@ export class MapController {
         }
       });
 
-      this.map.on("click", layerId, (event) => {
-        if (this.dragState?.didMove) {
-          return;
-        }
-
-        const point = this.#pointFromEvent(event);
-        if (!point) {
-          return;
-        }
-
-        if (event.originalEvent?.altKey) {
-          this.onPointRemoveRequest?.(point.id);
-          return;
-        }
-
-        this.focusPoint(point);
-        this.onPointSelect?.(point);
-      });
     });
 
     this.map.on("mousedown", CORE_LAYER_ID, (event) => {
@@ -394,7 +417,8 @@ export class MapController {
         }
 
         this.dragState.didMove = true;
-        this.#previewDraggedPoint(this.dragState.pointId, moveEvent.lngLat.lat, moveEvent.lngLat.lng);
+        const coordinates = normalizeCoordinates({ latitude: moveEvent.lngLat.lat, longitude: moveEvent.lngLat.lng });
+        this.#previewDraggedPoint(this.dragState.pointId, coordinates.latitude, coordinates.longitude);
       };
 
       const onMouseUp = (upEvent) => {
@@ -412,10 +436,11 @@ export class MapController {
 
         if (dragState.didMove) {
           this.suppressNextMapClick = true;
+          const coordinates = normalizeCoordinates({ latitude: upEvent.lngLat.lat, longitude: upEvent.lngLat.lng });
           this.onPointMoveRequest?.({
             pointId: dragState.pointId,
-            latitude: upEvent.lngLat.lat,
-            longitude: upEvent.lngLat.lng
+            latitude: coordinates.latitude,
+            longitude: coordinates.longitude
           });
         }
       };
@@ -460,8 +485,32 @@ export class MapController {
   }
 
   #pointFromEvent(event) {
-    const pointId = event.features?.[0]?.properties?.id;
+    return this.#pointFromFeatures(event.features);
+  }
+
+  #pointFromFeatures(features = []) {
+    const pointId = features.find((feature) => feature.properties?.id)?.properties?.id;
     return this.points.find((point) => point.id === pointId) ?? null;
+  }
+
+  #popupHtml(point) {
+    return `<strong>${escapeHtml(point.label)}</strong><br /><span>${escapeHtml(
+      formatCoordinates(point.latitude, point.longitude)
+    )}</span>`;
+  }
+
+  #syncPopup() {
+    if (!this.popup || !this.popupPointId) {
+      return;
+    }
+
+    const point = this.points.find((candidate) => candidate.id === this.popupPointId);
+    if (!point) {
+      this.popup.remove();
+      return;
+    }
+
+    this.popup.setLngLat([point.longitude, point.latitude]).setHTML(this.#popupHtml(point));
   }
 
   #pauseRotation() {

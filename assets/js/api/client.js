@@ -1,3 +1,5 @@
+import { formatApiErrorDetail } from "../utils/formatters.js";
+
 const JSON_HEADERS = {
   Accept: "application/json"
 };
@@ -61,7 +63,7 @@ export class ApiClient {
 
     if (!response.ok) {
       const detail = typeof payload === "object" ? payload?.detail : payload;
-      throw new Error(detail || `Request failed with status ${response.status}`);
+      throw new Error(formatApiErrorDetail(detail) || `Request failed with status ${response.status}`);
     }
 
     return payload;

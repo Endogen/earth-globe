@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "earth-marker-studio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python backend and MapLibre frontend for a globe-based OSM point editor"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,6 +12,20 @@ dependencies = [
   "fastapi>=0.135,<0.136",
   "uvicorn[standard]>=0.41,<0.42"
 ]
+
+[dependency-groups]
+dev = [
+  "httpx2>=2.7,<3",
+  "pytest>=8.3",
+  "ruff>=0.9"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
 
 [tool.setuptools.package-dir]
 "" = "src"

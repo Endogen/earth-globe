@@ -9,6 +9,7 @@ const apiClient = new ApiClient();
 const locationService = new LocationService();
 const ui = new UiController();
 const pointsStore = new PointsStore(apiClient);
+ui.setAppReady(false);
 
 let appConfig = null;
 let currentPoints = [];
@@ -99,27 +100,35 @@ async function bootstrap() {
   ui.setStatus("Loading configuration and points…");
   [appConfig] = await Promise.all([apiClient.getConfig(), pointsStore.load()]);
 
+  const prefersReducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const mapConfig = {
+    ...appConfig,
+    rotation: {
+      ...appConfig.rotation,
+      enabled: appConfig.rotation.enabled && !prefersReducedMotion
+    }
+  };
+
   ui.setMapTitle(`${appConfig.app_title} · Globe`);
   ui.exitEditMode(appConfig.default_point_color);
-  ui.elements.rotateToggle.checked = appConfig.rotation.enabled;
+  ui.elements.rotateToggle.checked = mapConfig.rotation.enabled;
+
+  await mapController.mount(mapConfig);
+  mapController.setPoints(currentPoints);
+  bindLocationUpdates();
+  ui.setAppReady(true);
   ui.setCurrentLocationButtonState({
     disabled: !locationService.isSupported() || !locationService.isSecureContext(),
     available: false,
     message: getLocationUnavailableMessage()
   });
 
-  await mapController.mount(appConfig);
-  mapController.setPoints(currentPoints);
-  bindLocationUpdates();
-
   ui.setStatus(
-    "Map ready. Click the globe to prefill coordinates, Shift-click to create instantly, drag points to move them, Alt-click saved points to remove them, or locate your current position.",
+    prefersReducedMotion
+      ? "Map ready. Auto-rotate is paused to respect your reduced-motion preference."
+      : "Map ready. Select a coordinate or add a saved point to begin.",
     "success"
   );
-
-  if (locationService.isSupported() && locationService.isSecureContext()) {
-    startLocationTracking({ reportErrors: false, showBusy: false }).catch(() => {});
-  }
 }
 
 function validatePayload(payload) {
@@ -326,3 +335,8 @@ function getLocationUnavailableMessage() {
 
   return "";
 }
+
+globalThis.addEventListener("beforeunload", () => {
+  locationService.stopTracking();
+  mapController.destroy();
+});

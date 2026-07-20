@@ -2,12 +2,14 @@ import { formatCoordinate, formatCoordinates, formatTimestamp } from "../utils/f
 
 export class UiController {
   constructor() {
+    this.appReady = false;
     this.elements = {
       form: document.getElementById("point-form"),
       label: document.getElementById("label"),
       latitude: document.getElementById("latitude"),
       longitude: document.getElementById("longitude"),
       color: document.getElementById("color"),
+      colorValue: document.getElementById("color-value"),
       status: document.getElementById("status"),
       pointsList: document.getElementById("points-list"),
       pointsCount: document.getElementById("points-count"),
@@ -26,6 +28,7 @@ export class UiController {
       submitPoint: document.getElementById("submit-point"),
       clearAllPoints: document.getElementById("clear-all-points")
     };
+    this.#syncColorValue();
   }
 
   bind({
@@ -41,12 +44,21 @@ export class UiController {
     onClearForm,
     onClearAllPoints
   }) {
-    this.elements.form.addEventListener("submit", (event) => {
+    this.elements.form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      onSubmit(this.getFormPayload());
+      if (this.elements.form.getAttribute("aria-busy") === "true") {
+        return;
+      }
+
+      this.setFormBusy(true);
+      try {
+        await onSubmit(this.getFormPayload());
+      } finally {
+        this.setFormBusy(false);
+      }
     });
 
-    this.elements.pointsList.addEventListener("click", (event) => {
+    this.elements.pointsList.addEventListener("click", async (event) => {
       const actionButton = event.target.closest("button[data-action]");
       if (!actionButton) {
         return;
@@ -57,12 +69,19 @@ export class UiController {
         return;
       }
 
-      if (actionButton.dataset.action === "edit") {
-        onEditPoint(pointId);
-      }
+      actionButton.disabled = true;
+      try {
+        if (actionButton.dataset.action === "edit") {
+          await onEditPoint(pointId);
+        }
 
-      if (actionButton.dataset.action === "remove") {
-        onRemovePoint(pointId);
+        if (actionButton.dataset.action === "remove") {
+          await onRemovePoint(pointId);
+        }
+      } finally {
+        if (actionButton.isConnected) {
+          actionButton.disabled = false;
+        }
       }
     });
 
@@ -75,7 +94,15 @@ export class UiController {
     this.elements.framePoints.addEventListener("click", onFramePoints);
     this.elements.resetView.addEventListener("click", onResetView);
     this.elements.clearForm.addEventListener("click", onClearForm);
-    this.elements.clearAllPoints.addEventListener("click", onClearAllPoints);
+    this.elements.clearAllPoints.addEventListener("click", async () => {
+      this.elements.clearAllPoints.disabled = true;
+      try {
+        await onClearAllPoints();
+      } finally {
+        this.elements.clearAllPoints.disabled = Number(this.elements.pointsCount.textContent) === 0;
+      }
+    });
+    this.elements.color.addEventListener("input", () => this.#syncColorValue());
   }
 
   getFormPayload(overrides = {}) {
@@ -98,6 +125,7 @@ export class UiController {
     this.elements.latitude.value = formatCoordinate(point.latitude);
     this.elements.longitude.value = formatCoordinate(point.longitude);
     this.elements.color.value = point.color;
+    this.#syncColorValue();
     this.setSelectionChip(`Editing ${point.label} · ${formatCoordinates(point.latitude, point.longitude)}`);
     this.elements.editorTitle.textContent = "Edit Point";
     this.elements.editorCopy.textContent = "Update the form or drag the point on the globe. Save changes when you are ready, or cancel to return to create mode.";
@@ -110,6 +138,8 @@ export class UiController {
   exitEditMode(defaultColor) {
     this.elements.form.reset();
     this.elements.color.value = defaultColor;
+    this.#syncColorValue();
+    this.setSelectionChip("No coordinate selected");
     this.elements.editorTitle.textContent = "Add Point";
     this.elements.editorCopy.textContent = "Click the globe to prefill coordinates. Shift-click creates instantly. Click a point to edit it, drag it to move it, and Alt-click to remove it.";
     this.elements.editorMode.textContent = "Create mode";
@@ -120,7 +150,7 @@ export class UiController {
 
   renderPoints(points, editingPointId = null) {
     this.elements.pointsCount.textContent = String(points.length);
-    this.elements.clearAllPoints.disabled = points.length === 0;
+    this.elements.clearAllPoints.disabled = !this.appReady || points.length === 0;
 
     if (points.length === 0) {
       this.elements.pointsList.innerHTML =
@@ -181,6 +211,7 @@ export class UiController {
       editButton.dataset.action = "edit";
       editButton.dataset.pointId = point.id;
       editButton.textContent = editingPointId === point.id ? "Editing" : "Edit";
+      editButton.setAttribute("aria-label", `Edit ${point.label}`);
 
       const removeButton = document.createElement("button");
       removeButton.type = "button";
@@ -188,6 +219,7 @@ export class UiController {
       removeButton.dataset.action = "remove";
       removeButton.dataset.pointId = point.id;
       removeButton.textContent = "Remove";
+      removeButton.setAttribute("aria-label", `Remove ${point.label}`);
 
       actions.append(editButton, removeButton);
       item.append(main, actions);
@@ -208,6 +240,39 @@ export class UiController {
     this.elements.selectionChip.textContent = value;
   }
 
+  setAppReady(ready) {
+    this.appReady = ready;
+    [
+      this.elements.rotateToggle,
+      this.elements.centerCurrentLocation,
+      this.elements.zoomIn,
+      this.elements.zoomOut,
+      this.elements.framePoints,
+      this.elements.resetView,
+      this.elements.label,
+      this.elements.latitude,
+      this.elements.longitude,
+      this.elements.color,
+      this.elements.submitPoint,
+      this.elements.clearForm
+    ].forEach((control) => {
+      control.disabled = !ready;
+    });
+    this.elements.clearAllPoints.disabled = !ready || Number(this.elements.pointsCount.textContent) === 0;
+  }
+
+  setFormBusy(busy) {
+    this.elements.form.setAttribute("aria-busy", String(busy));
+    Array.from(this.elements.form.elements).forEach((control) => {
+      control.disabled = busy;
+    });
+    this.elements.submitPoint.textContent = busy
+      ? "Saving…"
+      : this.elements.editorMode.dataset.mode === "editing"
+        ? "Update point"
+        : "Save point";
+  }
+
   setCurrentLocationButtonState({ disabled = false, busy = false, available = false, message = "" } = {}) {
     this.elements.centerCurrentLocation.disabled = disabled || busy;
     this.elements.centerCurrentLocation.textContent = busy
@@ -218,5 +283,9 @@ export class UiController {
           ? "Location unavailable"
           : "Find my location";
     this.elements.centerCurrentLocation.title = message;
+  }
+
+  #syncColorValue() {
+    this.elements.colorValue.value = this.elements.color.value.toUpperCase();
   }
 }

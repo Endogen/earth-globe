@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PointBase(BaseModel):
@@ -10,6 +10,11 @@ class PointBase(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     color: str = Field(default="#ff8d57", pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def strip_label(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class PointCreate(PointBase):

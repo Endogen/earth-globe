@@ -8,6 +8,8 @@
       name="description"
       content="Professional globe-based point editor powered by FastAPI, MapLibre, and OpenStreetMap-derived vector tiles."
     />
+    <meta name="theme-color" content="#050b13" />
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,15 +21,26 @@
     <script defer src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
   </head>
   <body>
-    <div class="noise"></div>
+    <a class="skip-link" href="#point-form">Skip to point editor</a>
+    <div class="noise" aria-hidden="true"></div>
     <main class="app-shell">
       <aside class="sidebar">
         <section class="sidebar__hero">
-          <p class="eyebrow">Python Backend + MapLibre Globe</p>
-          <h1>Earth Marker Studio</h1>
+          <div class="brand-row">
+            <div class="brand-mark" aria-hidden="true">◎</div>
+            <div>
+              <p class="eyebrow">Spatial workspace</p>
+              <h1>Earth Marker Studio</h1>
+            </div>
+          </div>
           <p class="intro">
-            Persistent globe-based OSM workspace for placing, editing, moving, and removing points with a clean FastAPI backend.
+            Place, organize, and revisit locations on a living 3D globe.
           </p>
+          <div class="technology-chips" aria-label="Technology stack">
+            <span>FastAPI</span>
+            <span>MapLibre</span>
+            <span>Local persistence</span>
+          </div>
         </section>
 
         <section class="panel metrics-panel" aria-label="Overview">
@@ -37,7 +50,7 @@
           </div>
           <div class="metric-pill">
             <span class="metric-pill__label">Surface</span>
-            <strong>OSM Vector</strong>
+            <strong>Open map</strong>
           </div>
           <div class="metric-pill">
             <span class="metric-pill__label">Points</span>
@@ -63,11 +76,11 @@
           </label>
 
           <div class="button-grid">
-            <button id="center-current-location" type="button" class="button-muted">Find my location</button>
+            <button id="center-current-location" type="button" class="button-muted button-grid__wide">Find my location</button>
             <button id="zoom-in" type="button">Zoom in</button>
             <button id="zoom-out" type="button">Zoom out</button>
             <button id="frame-points" type="button">Frame points</button>
-            <button id="reset-view" type="button">Reset view</button>
+            <button id="reset-view" type="button" class="button-grid__wide">Reset view</button>
           </div>
         </section>
 
@@ -85,21 +98,24 @@
           <form id="point-form" class="point-form">
             <label>
               Label
-              <input id="label" name="label" type="text" maxlength="48" placeholder="Operations hub" required />
+              <input id="label" name="label" type="text" maxlength="48" placeholder="Operations hub" autocomplete="off" required />
             </label>
             <div class="field-row">
               <label>
                 Latitude
-                <input id="latitude" name="latitude" type="number" min="-90" max="90" step="0.0001" required />
+                <input id="latitude" name="latitude" type="number" min="-90" max="90" step="0.0001" inputmode="decimal" required />
               </label>
               <label>
                 Longitude
-                <input id="longitude" name="longitude" type="number" min="-180" max="180" step="0.0001" required />
+                <input id="longitude" name="longitude" type="number" min="-180" max="180" step="0.0001" inputmode="decimal" required />
               </label>
             </div>
-            <label>
-              Accent color
-              <input id="color" name="color" type="color" value="#ff8d57" />
+            <label class="color-field">
+              <span>Accent color</span>
+              <span class="color-control">
+                <input id="color" name="color" type="color" value="#ff8d57" />
+                <output id="color-value" for="color">#FF8D57</output>
+              </span>
             </label>
             <div class="form-actions">
               <button id="submit-point" type="submit">Save point</button>
@@ -118,7 +134,7 @@
           </div>
 
           <button id="clear-all-points" type="button" class="button-danger">Remove all saved points</button>
-          <p id="status" class="status" role="status">Loading configuration…</p>
+          <p id="status" class="status" role="status" aria-live="polite">Loading configuration…</p>
           <ul id="points-list" class="points-list"></ul>
         </section>
       </aside>
@@ -131,7 +147,7 @@
           </div>
           <div class="selection-chip" id="selection-chip">No coordinate selected</div>
         </div>
-        <div class="map-shell__hint">Tip: click a saved point to edit it, drag the marker to move it, Alt-click to remove it, or use Find my location to show and center your live position.</div>
+        <div class="map-shell__hint"><span aria-hidden="true">⌁</span> Click the globe to select coordinates. Shift-click saves instantly.</div>
         <div id="map" class="map-canvas" aria-label="Interactive world map"></div>
       </section>
     </main>
