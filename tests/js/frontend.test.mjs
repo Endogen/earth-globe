@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { currentLocationToFeatureCollection, pointsToFeatureCollection } from "../../assets/js/map/geojson.js";
+import {
+  currentLocationToFeatureCollection,
+  pointsToFeatureCollection,
+  trackedDevicesToFeatureCollection
+} from "../../assets/js/map/geojson.js";
 import { buildLocationError, LocationService } from "../../assets/js/location/service.js";
 import { getWrappedPointCoordinates } from "../../assets/js/map/controller.js";
+import {
+  DevicesStore,
+  getDeviceRefreshDelay,
+  getDeviceRefreshStatus
+} from "../../assets/js/state/devices-store.js";
 import {
   createSolarTextureData,
   getNightOpacity,
@@ -16,6 +25,7 @@ import {
   normalizeCoordinates,
   normalizeLongitude
 } from "../../assets/js/utils/formatters.js";
+import { getDevicePresence } from "../../assets/js/ui/controller.js";
 
 test("normalizes coordinates into API-safe ranges", () => {
   assert.equal(normalizeLongitude(181), -179);
@@ -53,6 +63,99 @@ test("escapes popup labels and creates GeoJSON features", () => {
   ]);
   assert.deepEqual(collection.features[0].geometry.coordinates, [20, 10]);
   assert.deepEqual(currentLocationToFeatureCollection(null).features, []);
+});
+
+test("maps only devices with received locations onto the globe", () => {
+  const collection = trackedDevicesToFeatureCollection([
+    { id: "waiting", name: "Waiting phone", latest_location: null },
+    {
+      id: "located",
+      name: "Located phone",
+      latest_location: {
+        latitude: 52.52,
+        longitude: 13.405,
+        accuracy: 7.5,
+        captured_at: "2026-07-21T10:30:00Z"
+      }
+    }
+  ]);
+
+  assert.equal(collection.features.length, 1);
+  assert.deepEqual(collection.features[0].geometry.coordinates, [13.405, 52.52]);
+  assert.equal(collection.features[0].properties.label, "Located phone");
+});
+
+test("derives connected, offline, and locating device states", () => {
+  const now = Date.parse("2026-07-21T10:30:00Z");
+  assert.deepEqual(getDevicePresence({ last_seen_at: "2026-07-21T10:29:30Z" }, now), {
+    state: "online",
+    label: "Connected"
+  });
+  assert.deepEqual(getDevicePresence({ last_seen_at: "2026-07-21T10:20:00Z" }, now), {
+    state: "offline",
+    label: "Offline"
+  });
+  assert.deepEqual(getDevicePresence({ active_request: { status: "locating" } }, now), {
+    state: "waiting",
+    label: "Getting GPS fix"
+  });
+  assert.equal(getDevicePresence({ active_request: { status: "delivered" } }, now).label, "Request delivered");
+});
+
+test("slows device refreshes when the page is hidden", () => {
+  assert.equal(getDeviceRefreshDelay(), 4_000);
+  assert.equal(getDeviceRefreshDelay({ hasActiveRequest: true }), 750);
+  assert.equal(getDeviceRefreshDelay({ hidden: true }), 20_000);
+  assert.equal(getDeviceRefreshDelay({ hidden: true, hasActiveRequest: true }), 5_000);
+  assert.equal(getDeviceRefreshDelay({ retrying: true }), 8_000);
+});
+
+test("preserves useful tracking feedback while background state is unchanged", () => {
+  assert.equal(getDeviceRefreshStatus(), null);
+  assert.equal(
+    getDeviceRefreshStatus({ previousDeviceCount: 1, deviceCount: 1 }),
+    null
+  );
+  assert.equal(
+    getDeviceRefreshStatus({ hasActiveRequest: true }),
+    "Waiting for the requested location…"
+  );
+  assert.equal(
+    getDeviceRefreshStatus({ hadActiveRequest: true }),
+    "Device status is live. Location timestamps and accuracy are shown below."
+  );
+  assert.equal(
+    getDeviceRefreshStatus({ previousDeviceCount: 0, deviceCount: 1 }),
+    "Device status is live. Location timestamps and accuracy are shown below."
+  );
+});
+
+test("device store publishes requested and removed device state", async () => {
+  let devices = [{ id: "phone-1", name: "Phone" }];
+  const api = {
+    async listDevices() {
+      return devices;
+    },
+    async requestDeviceLocation(deviceId) {
+      devices = [{ ...devices[0], active_request: { id: "request-1", device_id: deviceId, status: "pending" } }];
+      return devices[0].active_request;
+    },
+    async deleteDevice(deviceId) {
+      const removed = devices.find((device) => device.id === deviceId);
+      devices = devices.filter((device) => device.id !== deviceId);
+      return removed;
+    }
+  };
+  const store = new DevicesStore(api);
+  const snapshots = [];
+  store.subscribe((snapshot) => snapshots.push(snapshot));
+
+  await store.load();
+  await store.requestLocation("phone-1");
+  assert.equal(store.snapshot()[0].active_request.status, "pending");
+  await store.remove("phone-1");
+  assert.deepEqual(store.snapshot(), []);
+  assert.ok(snapshots.length >= 4);
 });
 
 test("calculates expected solar declination at equinoxes and solstices", () => {

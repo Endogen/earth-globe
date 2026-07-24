@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Earth Tracker</string>
+    <string name="private_companion">PRIVATE COMPANION</string>
+    <string name="app_intro">Connect this phone to your private globe. GPS is activated only when you request a location from the website.</string>
+    <string name="status_not_paired">● Not paired</string>
+    <string name="detail_not_paired">Enter the server address and pairing code from the website.</string>
+    <string name="pair_this_phone">PAIR THIS PHONE</string>
+    <string name="server_address">Server address</string>
+    <string name="server_address_hint">https://your-server.example</string>
+    <string name="device_name">Device name</string>
+    <string name="device_name_hint">My Android phone</string>
+    <string name="default_device_name">%1$s %2$s</string>
+    <string name="pairing_code">One-time pairing code</string>
+    <string name="pairing_code_hint">ABCD-EFGH</string>
+    <string name="pair_device">Pair device</string>
+    <string name="remove_pairing">Remove pairing from phone</string>
+    <string name="reliability_setup">RELIABILITY SETUP</string>
+    <string name="permissions_need_attention">Location and notification permissions need attention.</string>
+    <string name="configure_location_access">Configure location access</string>
+    <string name="allow_background_operation">Allow reliable background operation</string>
+    <string name="foreground_notification_explanation">Android always shows a persistent notification while this phone is ready. You can stop tracking from that notification or here at any time.</string>
+    <string name="connection">CONNECTION</string>
+    <string name="start_tracking">Start reliable tracking</string>
+    <string name="stop_tracking">Stop tracking</string>
+</resources>

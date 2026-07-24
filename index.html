@@ -16,9 +16,19 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css" />
-    <link rel="stylesheet" href="/assets/styles/app.css" />
-    <script defer src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.css"
+      integrity="sha384-MGCxhspF/+ufueUgol3FDkiAYQbpSNRhBT0VWHJt64U8qIy9qlnXWx8LAbj6niPH"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="/assets/styles/app.css?v=0.3.2" />
+    <script
+      defer
+      src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"
+      integrity="sha384-pEfbADcwebVj4NNOvWFLUkm+FiGTICE5bChpV647czG7OpSqcHNgxM8QawfAkbRO"
+      crossorigin="anonymous"
+    ></script>
   </head>
   <body>
     <a class="skip-link" href="#point-form">Skip to point editor</a>
@@ -39,7 +49,7 @@
           <div class="technology-chips" aria-label="Technology stack">
             <span>FastAPI</span>
             <span>MapLibre</span>
-            <span>Local persistence</span>
+            <span>Private device tracking</span>
           </div>
         </section>
 
@@ -55,6 +65,10 @@
           <div class="metric-pill">
             <span class="metric-pill__label">Points</span>
             <strong id="points-count">0</strong>
+          </div>
+          <div class="metric-pill">
+            <span class="metric-pill__label">Devices</span>
+            <strong id="devices-count">—</strong>
           </div>
         </section>
 
@@ -110,6 +124,57 @@
           </div>
         </section>
 
+        <section class="panel tracking-panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Private companion</p>
+              <h2>Android Devices</h2>
+            </div>
+            <p>Pair your own phone and request a fresh location on demand. Offline requests stay queued for ten minutes.</p>
+          </div>
+
+          <form id="tracking-unlock-form" class="tracking-unlock-form">
+            <label>
+              Control key
+              <input id="tracking-token" type="password" autocomplete="current-password" placeholder="Paste the private control key" />
+            </label>
+            <button id="tracking-unlock" type="submit" class="button-device">Unlock devices</button>
+          </form>
+
+          <div id="tracking-controls" class="tracking-controls" hidden>
+            <div class="tracking-toolbar">
+              <span class="connection-badge" id="tracking-connection-badge" data-state="connected">Control access unlocked</span>
+              <button id="tracking-lock" type="button" class="button-quiet">Lock</button>
+            </div>
+
+            <form id="pair-device-form" class="pair-device-form">
+              <label>
+                Device name
+                <input id="pair-device-name" type="text" maxlength="64" placeholder="My Android phone" required />
+              </label>
+              <button id="create-pairing-code" type="submit" class="button-device">Create pairing code</button>
+            </form>
+
+            <div id="pairing-code-card" class="pairing-code-card" hidden>
+              <span>Enter this code in the Android app</span>
+              <strong id="pairing-code" aria-live="polite">—</strong>
+              <small id="pairing-code-expiry"></small>
+              <button id="copy-pairing-code" type="button" class="button-quiet">Copy pairing code</button>
+            </div>
+
+            <div class="tracking-download">
+              <div>
+                <strong>Android companion</strong>
+                <small id="apk-availability">Checking APK…</small>
+              </div>
+              <a id="apk-download" class="button-link button-device" href="/downloads/earth-tracker.apk" download hidden>Download APK</a>
+            </div>
+
+            <p id="tracking-status" class="tracking-status" role="status" aria-live="polite">Loading devices…</p>
+            <ul id="devices-list" class="devices-list"></ul>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="section-heading">
             <div>
@@ -147,7 +212,7 @@
 
           <div id="editor-mode" class="editor-mode">Create mode</div>
 
-          <form id="point-form" class="point-form">
+          <form id="point-form" class="point-form" tabindex="-1">
             <label>
               Label
               <input id="label" name="label" type="text" maxlength="48" placeholder="Operations hub" autocomplete="off" required />
@@ -204,6 +269,6 @@
       </section>
     </main>
 
-    <script type="module" src="/assets/js/main.js"></script>
+    <script type="module" src="/assets/js/main.js?v=0.3.2"></script>
   </body>
 </html>

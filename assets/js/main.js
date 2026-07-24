@@ -1,6 +1,11 @@
 import { ApiClient } from "./api/client.js";
 import { LocationService } from "./location/service.js";
 import { MapController } from "./map/controller.js";
+import {
+  DevicesStore,
+  getDeviceRefreshDelay,
+  getDeviceRefreshStatus
+} from "./state/devices-store.js?v=0.3.2";
 import { PointsStore } from "./state/points-store.js";
 import { UiController } from "./ui/controller.js";
 import { formatCoordinates } from "./utils/formatters.js";
@@ -9,14 +14,19 @@ const apiClient = new ApiClient();
 const locationService = new LocationService();
 const ui = new UiController();
 const pointsStore = new PointsStore(apiClient);
+const devicesStore = new DevicesStore(apiClient);
+const TRACKING_TOKEN_STORAGE_KEY = "earth-globe-tracking-token";
 ui.setAppReady(false);
 
 let appConfig = null;
 let currentPoints = [];
 let editingPointId = null;
 let currentLocation = null;
+let currentDevices = [];
 let solarLive = true;
 let solarTimer = null;
+let deviceRefreshTimer = null;
+let trackingUnlocked = false;
 
 const mapController = new MapController({
   containerId: "map",
@@ -43,6 +53,14 @@ pointsStore.subscribe((points) => {
   ui.renderPoints(points, editingPointId);
   if (mapController.map) {
     mapController.setPoints(points);
+  }
+});
+
+devicesStore.subscribe((devices) => {
+  currentDevices = devices;
+  ui.renderDevices(devices);
+  if (mapController.map) {
+    mapController.setTrackedDevices(devices);
   }
 });
 
@@ -107,6 +125,27 @@ ui.bind({
   onSolarNow: () => {
     setSolarLive(true);
     ui.setStatus("Returned to the live astronomical day and night cycle.", "success");
+  },
+  onUnlockTracking: async (token) => {
+    await unlockTracking(token, true);
+  },
+  onLockTracking: () => {
+    lockTracking();
+  },
+  onCreatePairingCode: async (deviceName) => {
+    await createDevicePairingCode(deviceName);
+  },
+  onCopyPairingCode: async (pairingCode) => {
+    await copyDevicePairingCode(pairingCode);
+  },
+  onRequestDeviceLocation: async (deviceId) => {
+    await requestTrackedDeviceLocation(deviceId);
+  },
+  onShowDevice: (deviceId) => {
+    showTrackedDevice(deviceId);
+  },
+  onRemoveDevice: async (deviceId) => {
+    await removeTrackedDevice(deviceId);
   }
 });
 
@@ -117,7 +156,12 @@ bootstrap().catch((error) => {
 
 async function bootstrap() {
   ui.setStatus("Loading configuration and points…");
-  [appConfig] = await Promise.all([apiClient.getConfig(), pointsStore.load()]);
+  let trackingStatus;
+  [appConfig, trackingStatus] = await Promise.all([
+    apiClient.getConfig(),
+    apiClient.getTrackingStatus(),
+    pointsStore.load()
+  ]);
 
   const prefersReducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const mapConfig = {
@@ -134,6 +178,7 @@ async function bootstrap() {
 
   await mapController.mount(mapConfig);
   mapController.setPoints(currentPoints);
+  mapController.setTrackedDevices(currentDevices);
   setSolarLive(true);
   bindLocationUpdates();
   ui.setAppReady(true);
@@ -142,6 +187,14 @@ async function bootstrap() {
     available: false,
     message: getLocationUnavailableMessage()
   });
+  ui.setApkAvailable(trackingStatus.apk_available);
+  ui.setTrackingLocked(true);
+  document.addEventListener("visibilitychange", handleTrackingVisibilityChange);
+
+  const savedTrackingToken = globalThis.sessionStorage?.getItem(TRACKING_TOKEN_STORAGE_KEY) ?? "";
+  if (savedTrackingToken) {
+    await unlockTracking(savedTrackingToken, false);
+  }
 
   ui.setStatus(
     prefersReducedMotion
@@ -149,6 +202,171 @@ async function bootstrap() {
       : "Map ready. Select a coordinate or add a saved point to begin.",
     "success"
   );
+}
+
+async function unlockTracking(token, reportError) {
+  const normalizedToken = token.trim();
+  if (!normalizedToken) {
+    if (reportError) {
+      ui.setStatus("Enter the private device-tracking control key.", "error");
+    }
+    return false;
+  }
+
+  apiClient.setTrackingToken(normalizedToken);
+  try {
+    await devicesStore.load();
+    trackingUnlocked = true;
+    globalThis.sessionStorage?.setItem(TRACKING_TOKEN_STORAGE_KEY, normalizedToken);
+    ui.setTrackingLocked(false);
+    ui.setTrackingConnection({ connected: true, message: "Control access unlocked" });
+    ui.setTrackingStatus(
+      currentDevices.length
+        ? `${currentDevices.length} paired device${currentDevices.length === 1 ? "" : "s"}. Waiting for requests.`
+        : "Ready to pair your first Android device."
+    );
+    ui.setStatus("Private Android device controls unlocked for this browser tab.", "success");
+    scheduleDeviceRefresh();
+    return true;
+  } catch (error) {
+    apiClient.setTrackingToken("");
+    trackingUnlocked = false;
+    globalThis.sessionStorage?.removeItem(TRACKING_TOKEN_STORAGE_KEY);
+    ui.setTrackingLocked(true);
+    if (reportError) {
+      ui.setStatus(error.message || "The device controls could not be unlocked.", "error");
+    }
+    return false;
+  }
+}
+
+function lockTracking() {
+  trackingUnlocked = false;
+  window.clearTimeout(deviceRefreshTimer);
+  apiClient.setTrackingToken("");
+  globalThis.sessionStorage?.removeItem(TRACKING_TOKEN_STORAGE_KEY);
+  devicesStore.clear();
+  ui.setTrackingLocked(true);
+  ui.setStatus("Device controls locked for this browser tab.");
+}
+
+function scheduleDeviceRefresh(delay = null) {
+  window.clearTimeout(deviceRefreshTimer);
+  if (!trackingUnlocked) {
+    return;
+  }
+  const refreshDelay =
+    delay ??
+    getDeviceRefreshDelay({
+      hidden: document.hidden,
+      hasActiveRequest: currentDevices.some((device) => device.active_request)
+    });
+  deviceRefreshTimer = window.setTimeout(async () => {
+    try {
+      const previousDeviceCount = currentDevices.length;
+      const hadActiveRequest = currentDevices.some((device) => device.active_request);
+      await devicesStore.load();
+      ui.setTrackingConnection({ connected: true, message: "Control access unlocked" });
+      const refreshStatus = getDeviceRefreshStatus({
+        hadActiveRequest,
+        hasActiveRequest: currentDevices.some((device) => device.active_request),
+        previousDeviceCount,
+        deviceCount: currentDevices.length
+      });
+      if (refreshStatus) {
+        ui.setTrackingStatus(refreshStatus);
+      }
+      scheduleDeviceRefresh();
+    } catch (error) {
+      const authenticationFailed = /control key|credential|required/i.test(error.message ?? "");
+      if (authenticationFailed) {
+        lockTracking();
+        ui.setStatus("The device-tracking control key is no longer valid.", "error");
+        return;
+      }
+      ui.setTrackingConnection({ connected: false, message: "Server connection interrupted" });
+      ui.setTrackingStatus("Retrying the device connection automatically…", "error");
+      scheduleDeviceRefresh(
+        getDeviceRefreshDelay({
+          hidden: document.hidden,
+          hasActiveRequest: currentDevices.some((device) => device.active_request),
+          retrying: true
+        })
+      );
+    }
+  }, refreshDelay);
+}
+
+function handleTrackingVisibilityChange() {
+  if (trackingUnlocked) {
+    scheduleDeviceRefresh(document.hidden ? null : 0);
+  }
+}
+
+async function createDevicePairingCode(deviceName) {
+  if (!deviceName) {
+    ui.setTrackingStatus("Enter a name for the phone before creating a code.", "error");
+    return;
+  }
+  try {
+    const pairing = await apiClient.createPairingCode(deviceName);
+    ui.showPairingCode(pairing);
+    ui.setTrackingStatus("Pairing code created. It can be used once and expires after ten minutes.", "success");
+  } catch (error) {
+    ui.setTrackingStatus(error.message || "The pairing code could not be created.", "error");
+  }
+}
+
+async function copyDevicePairingCode(pairingCode) {
+  try {
+    if (!globalThis.navigator?.clipboard?.writeText) {
+      throw new Error("Clipboard access is unavailable in this browser.");
+    }
+    await globalThis.navigator.clipboard.writeText(pairingCode);
+    ui.setTrackingStatus("Pairing code copied. Open Earth Tracker on the phone and paste it there.", "success");
+  } catch (error) {
+    ui.setTrackingStatus(error.message || "Select the pairing code and copy it manually.", "error");
+  }
+}
+
+async function requestTrackedDeviceLocation(deviceId) {
+  const device = currentDevices.find((item) => item.id === deviceId);
+  if (!device) {
+    ui.setTrackingStatus("That device is no longer registered.", "error");
+    return;
+  }
+  try {
+    await devicesStore.requestLocation(deviceId);
+    ui.setTrackingStatus(`Location requested from ${device.name}. Waiting for a fresh GPS fix…`, "success");
+    scheduleDeviceRefresh();
+  } catch (error) {
+    ui.setTrackingStatus(error.message || `Could not request ${device.name}'s location.`, "error");
+  }
+}
+
+function showTrackedDevice(deviceId) {
+  const device = currentDevices.find((item) => item.id === deviceId);
+  if (!device?.latest_location || !mapController.focusTrackedDevice(device)) {
+    ui.setTrackingStatus("This device has not sent a location yet.", "error");
+    return;
+  }
+  ui.setSelectionChip(
+    `${device.name} · ${formatCoordinates(device.latest_location.latitude, device.latest_location.longitude)}`
+  );
+  ui.setTrackingStatus(`Showing the latest location received from ${device.name}.`, "success");
+}
+
+async function removeTrackedDevice(deviceId) {
+  const device = currentDevices.find((item) => item.id === deviceId);
+  if (!device || !globalThis.confirm(`Unpair ${device.name} and delete its stored location history?`)) {
+    return;
+  }
+  try {
+    await devicesStore.remove(deviceId);
+    ui.setTrackingStatus(`${device.name} was unpaired and its device credential was revoked.`, "success");
+  } catch (error) {
+    ui.setTrackingStatus(error.message || `${device.name} could not be unpaired.`, "error");
+  }
 }
 
 function updateSolarCycle(date) {
@@ -394,6 +612,8 @@ function getLocationUnavailableMessage() {
 
 globalThis.addEventListener("beforeunload", () => {
   window.clearTimeout(solarTimer);
+  window.clearTimeout(deviceRefreshTimer);
+  document.removeEventListener("visibilitychange", handleTrackingVisibilityChange);
   locationService.stopTracking();
   mapController.destroy();
 });

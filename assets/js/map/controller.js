@@ -1,5 +1,10 @@
 import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js";
-import { currentLocationToFeatureCollection, emptyFeatureCollection, pointsToFeatureCollection } from "./geojson.js";
+import {
+  currentLocationToFeatureCollection,
+  emptyFeatureCollection,
+  pointsToFeatureCollection,
+  trackedDevicesToFeatureCollection
+} from "./geojson.js";
 import {
   drawSolarTexture,
   getSolarElevation,
@@ -17,6 +22,10 @@ const CURRENT_LOCATION_SOURCE_ID = "current-location";
 const CURRENT_LOCATION_HALO_LAYER_ID = "current-location-halo";
 const CURRENT_LOCATION_CORE_LAYER_ID = "current-location-core";
 const CURRENT_LOCATION_LABEL_LAYER_ID = "current-location-label";
+const TRACKED_DEVICE_SOURCE_ID = "tracked-devices";
+const TRACKED_DEVICE_HALO_LAYER_ID = "tracked-devices-halo";
+const TRACKED_DEVICE_CORE_LAYER_ID = "tracked-devices-core";
+const TRACKED_DEVICE_LABEL_LAYER_ID = "tracked-devices-label";
 const SOLAR_SOURCE_ID = "solar-illumination";
 const SOLAR_SHADE_LAYER_ID = "solar-shade";
 const SOLAR_CANVAS_ID = "solar-illumination-canvas";
@@ -87,6 +96,7 @@ export class MapController {
     this.dragState = null;
     this.suppressNextMapClick = false;
     this.currentLocation = null;
+    this.trackedDevices = [];
     this.solarPosition = getSolarPosition();
     this.solarCanvas = null;
     this.solarTextureFrame = null;
@@ -137,6 +147,7 @@ export class MapController {
     this.#installSolarLayers();
     this.#installPointLayers();
     this.#installCurrentLocationLayers();
+    this.#installTrackedDeviceLayers();
     this.#bindMapInteractions();
     this.#updateAtmosphere();
     this.startRotation();
@@ -155,6 +166,11 @@ export class MapController {
   setCurrentLocation(location) {
     this.currentLocation = location;
     this.#setCurrentLocationData(location);
+  }
+
+  setTrackedDevices(devices) {
+    this.trackedDevices = devices;
+    this.#setTrackedDeviceData(devices);
   }
 
   setSolarDate(value) {
@@ -223,6 +239,33 @@ export class MapController {
       this.popup = null;
       this.popupPointId = null;
     });
+  }
+
+  focusTrackedDevice(device) {
+    const location = device?.latest_location;
+    if (!this.map || !location) {
+      return false;
+    }
+
+    this.#pauseRotation();
+    this.map.flyTo({
+      center: [location.longitude, location.latitude],
+      zoom: Math.max(this.map.getZoom(), 14.8),
+      speed: 0.75,
+      essential: true
+    });
+    this.popup?.remove();
+    this.popupPointId = null;
+    this.popup = new window.maplibregl.Popup({ offset: 18 })
+      .setLngLat([location.longitude, location.latitude])
+      .setHTML(`<strong>${escapeHtml(device.name)}</strong><br /><span>${escapeHtml(
+        formatCoordinates(location.latitude, location.longitude)
+      )} · ±${Math.round(location.accuracy)} m</span>`)
+      .addTo(this.map);
+    this.popup.on("close", () => {
+      this.popup = null;
+    });
+    return true;
   }
 
   centerOnCurrentLocation() {
@@ -431,6 +474,56 @@ export class MapController {
     });
   }
 
+  #installTrackedDeviceLayers() {
+    this.map.addSource(TRACKED_DEVICE_SOURCE_ID, {
+      type: "geojson",
+      data: trackedDevicesToFeatureCollection(this.trackedDevices)
+    });
+
+    this.map.addLayer({
+      id: TRACKED_DEVICE_HALO_LAYER_ID,
+      type: "circle",
+      source: TRACKED_DEVICE_SOURCE_ID,
+      paint: {
+        "circle-color": "rgba(132, 240, 174, 0.48)",
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 10, 14, 26],
+        "circle-opacity": 0.62,
+        "circle-blur": 0.88
+      }
+    });
+
+    this.map.addLayer({
+      id: TRACKED_DEVICE_CORE_LAYER_ID,
+      type: "circle",
+      source: TRACKED_DEVICE_SOURCE_ID,
+      paint: {
+        "circle-color": "#84f0ae",
+        "circle-stroke-color": "rgba(255, 255, 255, 0.96)",
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 2, 1.5, 14, 2.4],
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 5, 14, 9]
+      }
+    });
+
+    this.map.addLayer({
+      id: TRACKED_DEVICE_LABEL_LAYER_ID,
+      type: "symbol",
+      source: TRACKED_DEVICE_SOURCE_ID,
+      minzoom: 3,
+      layout: {
+        "text-field": ["get", "label"],
+        "text-font": ["Noto Sans Regular"],
+        "text-offset": [0, 1.3],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 3, 10, 14, 13],
+        "text-anchor": "top"
+      },
+      paint: {
+        "text-color": "#ddffe9",
+        "text-halo-color": "rgba(4, 12, 20, 0.96)",
+        "text-halo-width": 1.2
+      }
+    });
+  }
+
   #bindMapInteractions() {
     this.map.on("click", (event) => {
       if (this.suppressNextMapClick) {
@@ -560,6 +653,13 @@ export class MapController {
     const source = this.map?.getSource(CURRENT_LOCATION_SOURCE_ID);
     if (source) {
       source.setData(currentLocationToFeatureCollection(location));
+    }
+  }
+
+  #setTrackedDeviceData(devices) {
+    const source = this.map?.getSource(TRACKED_DEVICE_SOURCE_ID);
+    if (source) {
+      source.setData(trackedDevicesToFeatureCollection(devices));
     }
   }
 

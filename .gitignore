@@ -4,3 +4,11 @@ __pycache__/
 .venv/
 .pytest_cache/
 graphify-out/
+data/tracking.sqlite3
+data/tracking.sqlite3-shm
+data/tracking.sqlite3-wal
+data/tracking-admin-token.txt
+android/.gradle/
+android/local.properties
+android/**/build/
+downloads/*.apk

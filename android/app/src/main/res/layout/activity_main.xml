@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingLeft="20dp"
+        android:paddingTop="28dp"
+        android:paddingRight="20dp"
+        android:paddingBottom="36dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.15"
+            android:text="@string/private_companion"
+            android:textColor="@color/sky_blue"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:text="@string/app_name"
+            android:textColor="@color/text_primary"
+            android:textSize="32sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:lineSpacingExtra="3dp"
+            android:text="@string/app_intro"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:background="@drawable/status_background"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/service_state"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/status_not_paired"
+                android:textColor="@color/device_green"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/service_detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:lineSpacingExtra="2dp"
+                android:text="@string/detail_not_paired"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/panel_background"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/pair_this_phone"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="@string/server_address"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/server_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:autofillHints="url"
+                android:background="@drawable/input_background"
+                android:hint="@string/server_address_hint"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:textColor="@color/text_primary"
+                android:textColorHint="#687989" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="13dp"
+                android:text="@string/device_name"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/device_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/input_background"
+                android:hint="@string/device_name_hint"
+                android:importantForAutofill="no"
+                android:inputType="textCapSentences"
+                android:maxLength="64"
+                android:maxLines="1"
+                android:textColor="@color/text_primary"
+                android:textColorHint="#687989" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="13dp"
+                android:text="@string/pairing_code"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/pairing_code"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/input_background"
+                android:fontFamily="monospace"
+                android:hint="@string/pairing_code_hint"
+                android:importantForAutofill="no"
+                android:inputType="textCapCharacters"
+                android:letterSpacing="0.09"
+                android:maxLength="12"
+                android:maxLines="1"
+                android:textColor="@color/text_primary"
+                android:textColorHint="#687989" />
+
+            <Button
+                android:id="@+id/pair_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/button_primary"
+                android:text="@string/pair_device"
+                android:textAllCaps="false"
+                android:textColor="@color/device_green_dark"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/unpair_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="9dp"
+                android:background="@drawable/button_secondary"
+                android:text="@string/remove_pairing"
+                android:textAllCaps="false"
+                android:textColor="@color/danger"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/panel_background"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reliability_setup"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/permission_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="9dp"
+                android:lineSpacingExtra="3dp"
+                android:text="@string/permissions_need_attention"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/location_permission_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/button_secondary"
+                android:text="@string/configure_location_access"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary" />
+
+            <Button
+                android:id="@+id/battery_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="9dp"
+                android:background="@drawable/button_secondary"
+                android:text="@string/allow_background_operation"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:lineSpacingExtra="2dp"
+                android:text="@string/foreground_notification_explanation"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/panel_background"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/connection"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/start_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/button_primary"
+                android:text="@string/start_tracking"
+                android:textAllCaps="false"
+                android:textColor="@color/device_green_dark"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/stop_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="9dp"
+                android:background="@drawable/button_secondary"
+                android:text="@string/stop_tracking"
+                android:textAllCaps="false"
+                android:textColor="@color/danger" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

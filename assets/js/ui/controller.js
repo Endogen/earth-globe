@@ -17,6 +17,24 @@ function formatSolarCoordinate(value, positive, negative) {
   return `${Math.abs(value).toFixed(1)}° ${direction}`;
 }
 
+export function getDevicePresence(device, now = Date.now()) {
+  if (device.active_request) {
+    const labels = {
+      pending: "Request queued",
+      delivered: "Request delivered",
+      locating: "Getting GPS fix"
+    };
+    return {
+      state: "waiting",
+      label: labels[device.active_request.status] ?? "Location requested"
+    };
+  }
+  const lastSeen = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0;
+  return now - lastSeen <= 45_000
+    ? { state: "online", label: "Connected" }
+    : { state: "offline", label: "Offline" };
+}
+
 export class UiController {
   constructor() {
     this.appReady = false;
@@ -31,6 +49,7 @@ export class UiController {
       status: document.getElementById("status"),
       pointsList: document.getElementById("points-list"),
       pointsCount: document.getElementById("points-count"),
+      devicesCount: document.getElementById("devices-count"),
       selectionChip: document.getElementById("selection-chip"),
       rotateToggle: document.getElementById("rotate-toggle"),
       centerCurrentLocation: document.getElementById("center-current-location"),
@@ -53,7 +72,24 @@ export class UiController {
       solarModeLabel: document.getElementById("solar-mode-label"),
       solarClock: document.getElementById("solar-clock"),
       solarPosition: document.getElementById("solar-position"),
-      solarNow: document.getElementById("solar-now")
+      solarNow: document.getElementById("solar-now"),
+      trackingUnlockForm: document.getElementById("tracking-unlock-form"),
+      trackingToken: document.getElementById("tracking-token"),
+      trackingUnlock: document.getElementById("tracking-unlock"),
+      trackingControls: document.getElementById("tracking-controls"),
+      trackingLock: document.getElementById("tracking-lock"),
+      trackingConnectionBadge: document.getElementById("tracking-connection-badge"),
+      pairDeviceForm: document.getElementById("pair-device-form"),
+      pairDeviceName: document.getElementById("pair-device-name"),
+      createPairingCode: document.getElementById("create-pairing-code"),
+      pairingCodeCard: document.getElementById("pairing-code-card"),
+      pairingCode: document.getElementById("pairing-code"),
+      pairingCodeExpiry: document.getElementById("pairing-code-expiry"),
+      copyPairingCode: document.getElementById("copy-pairing-code"),
+      trackingStatus: document.getElementById("tracking-status"),
+      devicesList: document.getElementById("devices-list"),
+      apkAvailability: document.getElementById("apk-availability"),
+      apkDownload: document.getElementById("apk-download")
     };
     this.#syncColorValue();
   }
@@ -72,7 +108,14 @@ export class UiController {
     onClearAllPoints,
     onSolarLiveToggle,
     onSolarSimulationChange,
-    onSolarNow
+    onSolarNow,
+    onUnlockTracking,
+    onLockTracking,
+    onCreatePairingCode,
+    onCopyPairingCode,
+    onRequestDeviceLocation,
+    onShowDevice,
+    onRemoveDevice
   }) {
     this.elements.form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -144,6 +187,57 @@ export class UiController {
       onSolarSimulationChange();
     });
     this.elements.solarNow.addEventListener("click", onSolarNow);
+    this.elements.trackingUnlockForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      this.elements.trackingUnlock.disabled = true;
+      this.elements.trackingUnlock.textContent = "Unlocking…";
+      try {
+        await onUnlockTracking(this.elements.trackingToken.value);
+      } finally {
+        this.elements.trackingUnlock.disabled = false;
+        this.elements.trackingUnlock.textContent = "Unlock devices";
+      }
+    });
+    this.elements.trackingLock.addEventListener("click", onLockTracking);
+    this.elements.pairDeviceForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      this.elements.createPairingCode.disabled = true;
+      this.elements.createPairingCode.textContent = "Creating…";
+      try {
+        await onCreatePairingCode(this.elements.pairDeviceName.value.trim());
+      } finally {
+        this.elements.createPairingCode.disabled = false;
+        this.elements.createPairingCode.textContent = "Create pairing code";
+      }
+    });
+    this.elements.copyPairingCode.addEventListener("click", async () => {
+      const code = this.elements.pairingCode.textContent.trim();
+      if (code && code !== "—") {
+        await onCopyPairingCode(code);
+      }
+    });
+    this.elements.devicesList.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action][data-device-id]");
+      if (!button) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        if (button.dataset.action === "locate") {
+          await onRequestDeviceLocation(button.dataset.deviceId);
+        }
+        if (button.dataset.action === "show") {
+          await onShowDevice(button.dataset.deviceId);
+        }
+        if (button.dataset.action === "remove") {
+          await onRemoveDevice(button.dataset.deviceId);
+        }
+      } finally {
+        if (button.isConnected) {
+          button.disabled = false;
+        }
+      }
+    });
   }
 
   getFormPayload(overrides = {}) {
@@ -268,6 +362,108 @@ export class UiController {
     });
   }
 
+  setTrackingLocked(locked) {
+    this.elements.trackingUnlockForm.hidden = !locked;
+    this.elements.trackingControls.hidden = locked;
+    this.elements.devicesCount.textContent = locked ? "—" : this.elements.devicesCount.textContent;
+    if (locked) {
+      this.elements.trackingToken.value = "";
+      this.elements.devicesList.innerHTML = "";
+      this.elements.pairingCodeCard.hidden = true;
+    }
+  }
+
+  setTrackingConnection({ connected, message }) {
+    this.elements.trackingConnectionBadge.dataset.state = connected ? "connected" : "error";
+    this.elements.trackingConnectionBadge.textContent = message;
+  }
+
+  setTrackingStatus(message, tone = "info") {
+    this.elements.trackingStatus.dataset.tone = tone;
+    this.elements.trackingStatus.textContent = message;
+  }
+
+  setApkAvailable(available) {
+    this.elements.apkDownload.hidden = !available;
+    this.elements.apkAvailability.textContent = available
+      ? "Signed development APK ready to install"
+      : "Build the APK to enable this download";
+  }
+
+  showPairingCode(pairing) {
+    this.elements.pairingCode.textContent = pairing.code;
+    this.elements.pairingCodeExpiry.textContent = `Valid until ${formatTimestamp(pairing.expires_at)}`;
+    this.elements.pairingCodeCard.hidden = false;
+  }
+
+  renderDevices(devices) {
+    this.elements.devicesCount.textContent = String(devices.length);
+    this.elements.devicesList.innerHTML = "";
+
+    if (devices.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "empty-state";
+      empty.textContent = "No Android devices paired yet. Create a pairing code to add one.";
+      this.elements.devicesList.append(empty);
+      return;
+    }
+
+    devices.forEach((device) => {
+      const presence = getDevicePresence(device);
+      const item = document.createElement("li");
+      item.className = "device-card";
+
+      const header = document.createElement("div");
+      header.className = "device-card__header";
+      const title = document.createElement("h3");
+      title.textContent = device.name;
+      const state = document.createElement("span");
+      state.className = "device-card__state";
+      state.dataset.state = presence.state;
+      state.textContent = presence.label;
+      header.append(title, state);
+
+      const meta = document.createElement("div");
+      meta.className = "device-card__meta";
+      const system = document.createElement("span");
+      system.textContent = `${device.platform_version} · App ${device.app_version}`;
+      const seen = document.createElement("span");
+      seen.textContent = device.last_seen_at ? `Last connection ${formatTimestamp(device.last_seen_at)}` : "Never connected";
+      const location = document.createElement("span");
+      location.textContent = device.latest_location
+        ? `${formatCoordinates(device.latest_location.latitude, device.latest_location.longitude)} · ±${Math.round(
+            device.latest_location.accuracy
+          )} m · ${formatTimestamp(device.latest_location.captured_at)}${
+            device.latest_location.source === "cached" ? " · cached" : ""
+          }`
+        : "No location received yet";
+      meta.append(system, seen);
+      if (device.active_request) {
+        const request = document.createElement("span");
+        request.className = "device-card__request";
+        request.textContent = `${presence.label} · requested ${formatTimestamp(device.active_request.created_at)}`;
+        meta.append(request);
+      }
+      meta.append(location);
+
+      const actions = document.createElement("div");
+      actions.className = "device-card__actions";
+      const locate = this.#deviceActionButton(
+        "locate",
+        device.id,
+        device.active_request ? "Locating…" : "Request location",
+        "device-card__locate"
+      );
+      locate.disabled = Boolean(device.active_request);
+      const show = this.#deviceActionButton("show", device.id, "Show on globe", "button-muted");
+      show.disabled = !device.latest_location;
+      const remove = this.#deviceActionButton("remove", device.id, "Unpair", "button-danger device-card__remove");
+      actions.append(locate, show, remove);
+      item.append(header, meta, actions);
+      this.elements.devicesList.append(item);
+    });
+  }
+
   setStatus(message, tone = "info") {
     this.elements.status.dataset.tone = tone;
     this.elements.status.textContent = message;
@@ -370,6 +566,16 @@ export class UiController {
 
   #syncColorValue() {
     this.elements.colorValue.value = this.elements.color.value.toUpperCase();
+  }
+
+  #deviceActionButton(action, deviceId, label, className) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.action = action;
+    button.dataset.deviceId = deviceId;
+    button.className = className;
+    button.textContent = label;
+    return button;
   }
 
   #syncSolarControlState() {

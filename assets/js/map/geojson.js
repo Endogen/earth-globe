@@ -47,3 +47,25 @@ export function currentLocationToFeatureCollection(location) {
     ]
   };
 }
+
+export function trackedDevicesToFeatureCollection(devices) {
+  return {
+    type: "FeatureCollection",
+    features: devices
+      .filter((device) => device.latest_location)
+      .map((device) => ({
+        type: "Feature",
+        id: device.id,
+        geometry: {
+          type: "Point",
+          coordinates: [device.latest_location.longitude, device.latest_location.latitude]
+        },
+        properties: {
+          id: device.id,
+          label: device.name,
+          accuracy: device.latest_location.accuracy,
+          captured_at: device.latest_location.captured_at
+        }
+      }))
+  };
+}

@@ -196,7 +196,7 @@ button {
 
 .metrics-panel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
 }
 
@@ -426,6 +426,7 @@ label {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="number"],
 input[type="date"],
 input[type="color"] {
@@ -439,6 +440,7 @@ input[type="color"] {
 
 input[type="number"],
 input[type="text"],
+input[type="password"],
 input[type="date"] {
   font-family: "IBM Plex Mono", monospace;
 }
@@ -513,6 +515,203 @@ button:disabled {
   cursor: not-allowed;
   filter: saturate(0.35);
   opacity: 0.6;
+}
+
+.button-device,
+.device-card__locate,
+.button-link.button-device {
+  background: linear-gradient(135deg, #baf7cf, #70dca1);
+  color: #07160f;
+}
+
+.button-quiet {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: none;
+  color: var(--text-main);
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0.62rem 0.78rem;
+  border-radius: 0.78rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.tracking-unlock-form,
+.pair-device-form,
+.tracking-controls {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tracking-unlock-form,
+.tracking-controls {
+  margin-top: 0.9rem;
+}
+
+.tracking-toolbar,
+.tracking-download {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.tracking-download {
+  padding: 0.75rem 0.8rem;
+  border: 1px solid rgba(132, 240, 174, 0.15);
+  border-radius: 0.9rem;
+  background: rgba(132, 240, 174, 0.045);
+}
+
+.tracking-download > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.tracking-download small,
+.pairing-code-card span,
+.pairing-code-card small,
+.device-card__meta,
+.tracking-status {
+  color: var(--text-soft);
+}
+
+.connection-badge,
+.device-card__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
+  color: var(--success);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.connection-badge::before,
+.device-card__state::before {
+  width: 0.52rem;
+  height: 0.52rem;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0.7rem currentColor;
+  content: "";
+}
+
+.connection-badge[data-state="error"],
+.device-card__state[data-state="offline"] {
+  color: var(--danger);
+}
+
+.device-card__state[data-state="waiting"] {
+  color: #ffc47d;
+}
+
+.device-card__state[data-state="waiting"]::before {
+  animation: device-pulse 1.5s ease-in-out infinite;
+}
+
+.device-card__request {
+  color: #ffd29a;
+}
+
+@keyframes device-pulse {
+  50% {
+    opacity: 0.38;
+    transform: scale(0.78);
+  }
+}
+
+.pairing-code-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(105, 213, 255, 0.24);
+  border-radius: 0.95rem;
+  background: rgba(105, 213, 255, 0.065);
+  text-align: center;
+}
+
+.pairing-code-card[hidden],
+.tracking-unlock-form[hidden],
+.tracking-controls[hidden] {
+  display: none !important;
+}
+
+.pairing-code-card strong {
+  color: #c9f2ff;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 1.65rem;
+  letter-spacing: 0.13em;
+  user-select: all;
+}
+
+.pairing-code-card button {
+  margin-top: 0.35rem;
+}
+
+.tracking-status {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.tracking-status[data-tone="error"] {
+  color: #ffb1a6;
+}
+
+.devices-list {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.device-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(132, 240, 174, 0.13);
+  border-radius: 1rem;
+  background: rgba(1, 8, 16, 0.65);
+}
+
+.device-card__header,
+.device-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.device-card__header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.device-card__meta {
+  display: grid;
+  gap: 0.18rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.device-card__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.device-card__actions button {
+  padding-inline: 0.72rem;
 }
 
 .panel--stretch {
@@ -689,13 +888,61 @@ button:disabled {
 }
 
 .maplibregl-ctrl button {
+  width: 2.5rem;
+  height: 2.5rem;
   border-radius: 0;
 }
 
 .maplibregl-popup-content {
+  border: 1px solid rgba(164, 196, 222, 0.22);
   border-radius: 0.95rem;
-  padding: 0.75rem 0.9rem;
+  background: rgba(7, 16, 27, 0.96);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.46);
+  color: var(--text-main);
   font-family: "Space Grotesk", sans-serif;
+  line-height: 1.45;
+  padding: 0.8rem 2.4rem 0.8rem 0.95rem;
+}
+
+.maplibregl-popup-content span {
+  color: var(--text-soft);
+}
+
+.maplibregl-popup-close-button {
+  top: 0.42rem;
+  right: 0.42rem;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 0.55rem;
+  color: var(--text-soft);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.maplibregl-popup-close-button:hover,
+.maplibregl-popup-close-button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: rgba(7, 16, 27, 0.96);
+}
+
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: rgba(7, 16, 27, 0.96);
+}
+
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: rgba(7, 16, 27, 0.96);
+}
+
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: rgba(7, 16, 27, 0.96);
 }
 
 @media (max-width: 1100px) {
@@ -729,6 +976,20 @@ button:disabled {
   .sidebar > .panel:not(.metrics-panel) {
     order: 3;
   }
+
+  .maplibregl-ctrl button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .maplibregl-popup-content {
+    padding-right: 3.25rem;
+  }
+
+  .maplibregl-popup-close-button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
 }
 
 @media (max-width: 640px) {
@@ -743,7 +1004,7 @@ button:disabled {
   }
 
   .metrics-panel {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .metric-pill {
@@ -780,6 +1041,14 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .device-card__actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .device-card__actions .device-card__remove {
+    grid-column: 1 / -1;
+  }
+
   .map-shell {
     min-height: 64svh;
   }
@@ -790,6 +1059,8 @@ button:disabled {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 
