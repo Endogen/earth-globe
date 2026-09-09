@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
 
-from ...dependencies import get_point_repository
+from ...dependencies import get_point_repository, require_tracking_admin
 from ...models import ClearPointsResult, Point, PointCreate, PointUpdate
 from ...storage import PointRepository
 
-router = APIRouter(prefix="/points", tags=["points"])
+router = APIRouter(prefix="/points", tags=["points"], dependencies=[Depends(require_tracking_admin)])
 
 
 @router.get("", response_model=list[Point])

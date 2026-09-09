@@ -29,6 +29,8 @@ export class DevicesStore extends EventTarget {
     this.apiClient = apiClient;
     this.devices = [];
     this.mutationQueue = Promise.resolve();
+    this.generation = 0;
+    this.loadSequence = 0;
   }
 
   subscribe(listener) {
@@ -43,22 +45,31 @@ export class DevicesStore extends EventTarget {
   }
 
   async load() {
-    this.devices = await this.apiClient.listDevices();
-    this.#emit();
+    const generation = this.generation;
+    const sequence = ++this.loadSequence;
+    const data = await this.apiClient.listDevices();
+    if (generation === this.generation && sequence === this.loadSequence) {
+      this.devices = data;
+      this.#emit();
+    }
     return this.snapshot();
   }
 
   async requestLocation(deviceId) {
-    return this.#enqueueMutation(async () => {
+    return this.#enqueueMutation(async (generation) => {
       const request = await this.apiClient.requestDeviceLocation(deviceId);
+      if (generation !== this.generation) return;
+      this.loadSequence += 1;
       await this.load();
       return request;
     });
   }
 
   async remove(deviceId) {
-    return this.#enqueueMutation(async () => {
+    return this.#enqueueMutation(async (generation) => {
       const removed = await this.apiClient.deleteDevice(deviceId);
+      if (generation !== this.generation) return;
+      this.loadSequence += 1;
       this.devices = this.devices.filter((device) => device.id !== deviceId);
       this.#emit();
       return removed;
@@ -66,6 +77,7 @@ export class DevicesStore extends EventTarget {
   }
 
   clear() {
+    this.generation += 1;
     this.devices = [];
     this.#emit();
   }
@@ -75,7 +87,9 @@ export class DevicesStore extends EventTarget {
   }
 
   #enqueueMutation(operation) {
-    const result = this.mutationQueue.then(operation, operation);
+    const generation = this.generation;
+    const run = () => generation === this.generation ? operation(generation) : undefined;
+    const result = this.mutationQueue.then(run, run);
     this.mutationQueue = result.catch(() => undefined);
     return result;
   }

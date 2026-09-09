@@ -282,3 +282,87 @@ test("requests a cache-friendly balanced location fix by default", async () => {
     }
   }
 });
+
+test("device refresh cannot restore private data after locking", async () => {
+  let resolveLoad;
+  const store = new DevicesStore({ listDevices: () => new Promise((resolve) => { resolveLoad = resolve; }) });
+  const load = store.load();
+  store.clear();
+  resolveLoad([{ id: "private-phone" }]);
+  await load;
+  assert.deepEqual(store.snapshot(), []);
+});
+
+test("only the newest device refresh is applied", async () => {
+  const resolvers = [];
+  const store = new DevicesStore({ listDevices: () => new Promise((resolve) => resolvers.push(resolve)) });
+  const first = store.load();
+  const second = store.load();
+  resolvers[1]([{ id: "current" }]);
+  await second;
+  resolvers[0]([{ id: "old" }]);
+  await first;
+  assert.equal(store.snapshot()[0].id, "current");
+});
+
+test("locking discards pending point saves and queued mutations", async () => {
+  const { PointsStore } = await import("../../assets/js/state/points-store.js");
+  let finish;
+  let calls = 0;
+  const store = new PointsStore({ createPoint: () => {
+    calls += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  } });
+  const first = store.add({ label: "Private" });
+  await Promise.resolve();
+  const second = store.add({ label: "Queued" });
+  store.reset();
+  finish({ id: "private", label: "Private" });
+  await Promise.all([first, second]);
+  assert.equal(calls, 1);
+  assert.deepEqual(store.snapshot(), []);
+});
+
+test("API uses cookie sessions, handles empty responses, and preserves status codes", async (t) => {
+  const { ApiClient } = await import("../../assets/js/api/client.js");
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    requests.push({ url, options });
+    return new Response(null, { status: 204 });
+  });
+  const api = new ApiClient();
+  assert.equal(await api.unlock("a-private-key"), null);
+  assert.equal(requests[0].options.credentials, "same-origin");
+  assert.equal(requests[0].options.headers.Authorization, undefined);
+  assert.deepEqual(JSON.parse(requests[0].options.body), { control_key: "a-private-key" });
+  let expired = false;
+  api.addEventListener("unauthorized", () => { expired = true; });
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: "Session expired" }), {
+    status: 401, headers: { "Content-Type": "application/json" }
+  });
+  await assert.rejects(api.listPoints(), (error) => error.status === 401);
+  assert.equal(expired, true);
+});
+
+test("stopping geolocation settles the request and ignores late callbacks", async () => {
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const secureDescriptor = Object.getOwnPropertyDescriptor(globalThis, "isSecureContext");
+  let success;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { geolocation: {
+    watchPosition(callback) { success = callback; return 1; }, clearWatch() {}
+  } } });
+  Object.defineProperty(globalThis, "isSecureContext", { configurable: true, value: true });
+  try {
+    const service = new LocationService();
+    const pending = service.ensureTracking();
+    service.stopTracking();
+    await assert.rejects(pending, /stopped/);
+    success({ coords: { latitude: 1, longitude: 2, accuracy: 3 }, timestamp: Date.now() });
+    assert.equal(service.getCurrentLocation(), null);
+  } finally {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else delete globalThis.navigator;
+    if (secureDescriptor) Object.defineProperty(globalThis, "isSecureContext", secureDescriptor);
+    else delete globalThis.isSecureContext;
+  }
+});

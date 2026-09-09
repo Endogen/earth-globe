@@ -5,6 +5,8 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from filelock import FileLock
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
@@ -24,18 +26,21 @@ def get_or_create_tracking_admin_token() -> str:
         return configured_token
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if TRACKING_ADMIN_TOKEN_FILE.exists():
-        token = TRACKING_ADMIN_TOKEN_FILE.read_text(encoding="utf-8").strip()
-        if len(token) >= 24:
+    with FileLock(str(TRACKING_ADMIN_TOKEN_FILE) + ".lock"):
+        if TRACKING_ADMIN_TOKEN_FILE.exists():
+            token = TRACKING_ADMIN_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if len(token) < 24:
+                raise RuntimeError("The saved control key is invalid. Restore it or set EARTH_GLOBE_ADMIN_TOKEN.")
             TRACKING_ADMIN_TOKEN_FILE.chmod(0o600)
             return token
 
-    token = secrets.token_urlsafe(32)
-    descriptor = os.open(TRACKING_ADMIN_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(descriptor, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as token_file:
-        token_file.write(f"{token}\n")
-    return token
+        token = secrets.token_urlsafe(32)
+        descriptor = os.open(TRACKING_ADMIN_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as token_file:
+            token_file.write(f"{token}\n")
+            token_file.flush()
+            os.fsync(token_file.fileno())
+        return token
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +66,8 @@ class AppSettings:
     title: str = "Earth Marker Studio"
     description: str = "Private globe workspace with saved points and on-demand Android device tracking"
     map_style_url: str = "https://tiles.openfreemap.org/styles/liberty"
-    custom_attribution: str = '<a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>'
+    # The selected style supplies OpenFreeMap / OpenStreetMap attribution.
+    custom_attribution: str = ""
     default_point_color: str = "#ff8d57"
     view: ViewDefaults = ViewDefaults()
     rotation: RotationDefaults = RotationDefaults()

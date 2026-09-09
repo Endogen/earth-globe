@@ -1,4 +1,4 @@
-import { formatCoordinate, formatCoordinates, formatTimestamp } from "../utils/formatters.js";
+import { formatCoordinate, formatCoordinates, formatTimestamp } from "../utils/formatters.js?v=0.4.0";
 
 const UTC_DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -38,6 +38,10 @@ export function getDevicePresence(device, now = Date.now()) {
 export class UiController {
   constructor() {
     this.appReady = false;
+    this.workspaceLocked = true;
+    this.renderedPoints = [];
+    this.editingPointId = null;
+    this.deviceRenderKey = null;
     this.solarLive = true;
     this.elements = {
       form: document.getElementById("point-form"),
@@ -92,6 +96,10 @@ export class UiController {
       apkDownload: document.getElementById("apk-download")
     };
     this.#syncColorValue();
+    document.getElementById("point-search").addEventListener("input", () => {
+      this.renderPoints(this.renderedPoints, this.editingPointId);
+    });
+    document.getElementById("retry-map").addEventListener("click", () => window.location.reload());
   }
 
   bind({
@@ -195,7 +203,7 @@ export class UiController {
         await onUnlockTracking(this.elements.trackingToken.value);
       } finally {
         this.elements.trackingUnlock.disabled = false;
-        this.elements.trackingUnlock.textContent = "Unlock devices";
+        this.elements.trackingUnlock.textContent = "Unlock workspace";
       }
     });
     this.elements.trackingLock.addEventListener("click", onLockTracking);
@@ -276,7 +284,7 @@ export class UiController {
     this.#syncColorValue();
     this.setSelectionChip("No coordinate selected");
     this.elements.editorTitle.textContent = "Add Point";
-    this.elements.editorCopy.textContent = "Click the globe to prefill coordinates. Shift-click creates instantly. Click a point to edit it, drag it to move it, and Alt-click to remove it.";
+    this.elements.editorCopy.textContent = "Choose a spot on the globe or enter coordinates, then save it here.";
     this.elements.editorMode.textContent = "Create mode";
     this.elements.editorMode.dataset.mode = "create";
     this.elements.submitPoint.textContent = "Save point";
@@ -284,18 +292,28 @@ export class UiController {
   }
 
   renderPoints(points, editingPointId = null) {
-    this.elements.pointsCount.textContent = String(points.length);
-    this.elements.clearAllPoints.disabled = !this.appReady || points.length === 0;
+    this.renderedPoints = points;
+    this.editingPointId = editingPointId;
+    const query = document.getElementById("point-search").value.trim().toLocaleLowerCase();
+    const filtered = points.filter((point) => point.label.toLocaleLowerCase().includes(query));
+    document.getElementById("search-summary").textContent = this.workspaceLocked ? "Unlock to view saved points." : `${filtered.length} of ${points.length} points`;
 
-    if (points.length === 0) {
+    this.elements.pointsCount.textContent = String(points.length);
+    this.elements.clearAllPoints.disabled = this.workspaceLocked || points.length === 0;
+
+    if (filtered.length === 0) {
       this.elements.pointsList.innerHTML =
         '<li class="empty-state">No saved points yet. Add one from the form or Shift-click on the globe.</li>';
+      this.elements.pointsList.firstElementChild.textContent = this.workspaceLocked
+        ? "Your saved points are private. Unlock the workspace to see them."
+        : query ? "No matching points. Try a different label." : "No saved points yet. Add your first location above.";
       return;
     }
 
     this.elements.pointsList.innerHTML = "";
 
-    points.forEach((point) => {
+    const fragment = document.createDocumentFragment();
+    filtered.forEach((point) => {
       const item = document.createElement("li");
       item.className = `point-card${editingPointId === point.id ? " point-card--active" : ""}`;
 
@@ -358,18 +376,33 @@ export class UiController {
 
       actions.append(editButton, removeButton);
       item.append(main, actions);
-      this.elements.pointsList.append(item);
+      fragment.append(item);
     });
+    this.elements.pointsList.append(fragment);
   }
 
   setTrackingLocked(locked) {
+    this.workspaceLocked = locked;
+    document.getElementById("access-panel").dataset.unlocked = String(!locked);
+    document.getElementById("workspace-session").hidden = locked;
+    document.getElementById("devices-locked-note").hidden = !locked;
+    this.elements.trackingToken.value = "";
+    this.elements.trackingLock.hidden = locked;
+    this.deviceRenderKey = null;
+    this.setFormBusy(false);
+    this.renderPoints(this.renderedPoints, this.editingPointId);
     this.elements.trackingUnlockForm.hidden = !locked;
     this.elements.trackingControls.hidden = locked;
     this.elements.devicesCount.textContent = locked ? "—" : this.elements.devicesCount.textContent;
     if (locked) {
+      document.getElementById("point-search").value = "";
+      this.elements.pairDeviceName.value = "";
+      this.elements.trackingStatus.textContent = "";
       this.elements.trackingToken.value = "";
       this.elements.devicesList.innerHTML = "";
       this.elements.pairingCodeCard.hidden = true;
+      this.elements.pairingCode.textContent = "—";
+      this.elements.pairingCodeExpiry.textContent = "";
     }
   }
 
@@ -397,6 +430,9 @@ export class UiController {
   }
 
   renderDevices(devices) {
+    const renderKey = JSON.stringify(devices.map((device) => ({ ...device, presence: getDevicePresence(device) })));
+    if (renderKey === this.deviceRenderKey) return;
+    this.deviceRenderKey = renderKey;
     this.elements.devicesCount.textContent = String(devices.length);
     this.elements.devicesList.innerHTML = "";
 
@@ -438,6 +474,12 @@ export class UiController {
           }`
         : "No location received yet";
       meta.append(system, seen);
+      if (!device.active_request && device.latest_request?.error) {
+        const failure = document.createElement("div");
+        failure.className = "device-card__failure";
+        failure.textContent = device.latest_request.error;
+        meta.append(failure);
+      }
       if (device.active_request) {
         const request = document.createElement("span");
         request.className = "device-card__request";
@@ -530,12 +572,13 @@ export class UiController {
     });
     this.elements.clearAllPoints.disabled = !ready || Number(this.elements.pointsCount.textContent) === 0;
     this.#syncSolarControlState();
+    this.setFormBusy(false);
   }
 
   setFormBusy(busy) {
     this.elements.form.setAttribute("aria-busy", String(busy));
     Array.from(this.elements.form.elements).forEach((control) => {
-      control.disabled = busy;
+      control.disabled = busy || this.workspaceLocked;
     });
     this.elements.submitPoint.textContent = busy
       ? "Saving…"

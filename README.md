@@ -14,7 +14,9 @@ Professional globe-based point editor with:
 - responsive desktop/mobile controls with reduced-motion support
 - private Android device registration with one-time pairing codes
 - on-demand, accuracy-aware device locations rendered separately from saved points
-- authenticated device controls, hashed device credentials, revocation, and SQLite tracking history
+- authenticated workspace access with expiring HttpOnly sessions, hashed device credentials, revocation, and SQLite tracking history
+- searchable saved points, visible request failures, and keyboard-friendly editor navigation
+- cached point reads, cross-process write locks, and map rendering that pauses when hidden
 - a sideloadable Android companion with a visible foreground connection and durable result retries
 - Python API tests, JavaScript utility tests, and Android JVM tests
 
@@ -114,7 +116,7 @@ EARTH_GLOBE_ADMIN_TOKEN='replace-with-a-long-random-secret' \
 
 Then:
 
-1. Open the website and paste the control key into Android Devices.
+1. Open the website and paste the control key into Workspace access. This unlocks both saved points and Android devices.
 2. Create a one-time pairing code.
 3. Install and open Earth Tracker on the phone.
 4. Enter the server base address, device name, and pairing code.
@@ -127,12 +129,25 @@ The pairing code is valid once for ten minutes. Location requests also remain qu
 
 The foreground connection and retry protocol are designed for reliable personal use, but Android cannot provide an absolute guarantee. A request cannot complete while the phone has no network, Location Services are disabled, the app is force-stopped, or the device is powered off. The website therefore shows connection state, request state, location capture time, accuracy, and whether a recent cached fix had to be used.
 
+## Workspace access and upgrades
+
+Version 0.4 protects **all** point reads and writes with the same control key used for device administration. Reload the browser after updating to load the versioned frontend modules. Existing point files and device registrations continue to work. API scripts must now include `Authorization: Bearer <control-key>` for `/api/points`.
+
+The browser exchanges the control key for a random session cookie; the key is cleared from the form and never written to browser storage. Sessions are stored as hashes in SQLite, expire after eight hours, and use `HttpOnly`, `SameSite=Strict`, and `Secure` on HTTPS. Lock revokes the session and clears visible points, device details, browser geolocation, and the selected map view. Other open tabs are notified. Changing the server control key and restarting invalidates sessions issued under the old key.
+
+Login and pairing each allow ten attempts per client IP per minute. Rate-limit state is shared through SQLite. If you run behind an HTTPS reverse proxy, preserve the public Host and configure Uvicorn to trust forwarded headers **only from your proxy**, so origin checks, Secure cookies, and client-IP limits work correctly. API responses use `Cache-Control: no-store`; application assets revalidate to avoid stale authentication code after upgrades.
+
+This remains a private, single-owner workspace. It does not provide separate user accounts, roles, MFA, or SSO. The local HTTP development workflow is supported; use HTTPS for remote access. If you change the map style or external asset hosts, update the content security policy in `main.py` too.
+
+Point storage uses cross-process file locks on a local filesystem and an atomic JSON replace. Reads cache validated points until the file changes. SQLite connections are explicitly closed after each operation. The globe suspends rotation in hidden tabs, skips unchanged device geometry, and batches solar slider updates into animation frames.
+
 ## Quality checks
 
 ```bash
 uv run ruff check src tests
 uv run pytest
 npm test
+uv run python scripts/benchmark_storage.py
 cd android && ./gradlew assembleDebug lintDebug testDebugUnitTest
 ```
 
@@ -140,11 +155,14 @@ cd android && ./gradlew assembleDebug lintDebug testDebugUnitTest
 
 - `GET /api/health`
 - `GET /api/config`
-- `GET /api/points`
-- `DELETE /api/points`
-- `POST /api/points`
-- `PUT /api/points/{point_id}`
-- `DELETE /api/points/{point_id}`
+- `POST /api/auth/session` (exchange control key for an eight-hour browser session)
+- `GET /api/auth/session` (check session)
+- `DELETE /api/auth/session` (revoke session)
+- `GET /api/points` (control key or session)
+- `DELETE /api/points` (control key or session)
+- `POST /api/points` (control key or session)
+- `PUT /api/points/{point_id}` (control key or session)
+- `DELETE /api/points/{point_id}` (control key or session)
 - `GET /api/tracking/status`
 - `POST /api/devices/pairing-codes` (control key)
 - `GET /api/devices` (control key)
@@ -155,10 +173,13 @@ cd android && ./gradlew assembleDebug lintDebug testDebugUnitTest
 - `POST /api/device/location-results` (device credential)
 - `POST /api/device/location-failures` (device credential)
 
+Set `EARTH_GLOBE_ADMIN_TOKEN` in your shell to your existing control key before running these examples.
+
 Example create request:
 
 ```bash
 curl -X POST http://127.0.0.1:8132/api/points \
+  -H "Authorization: Bearer ${EARTH_GLOBE_ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   -d '{
     "label": "Operations Hub",
@@ -172,6 +193,7 @@ Example update request:
 
 ```bash
 curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
+  -H "Authorization: Bearer ${EARTH_GLOBE_ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   -d '{
     "label": "Operations Hub Updated",
@@ -190,6 +212,8 @@ curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
 - Drag a point on the globe to move it
 - Alt-click a point on the globe or use the remove action in the list to delete it
 - Use `Remove all saved points` to clear the persisted collection in one action
+- Use the section shortcuts to jump to the editor, saved points, Android devices, or solar controls
+- Filter the saved-point list by label without hiding other points on the globe
 - Toggle auto-rotate on or off from the control panel
 - Keep `Live time` enabled to follow the current Sun position, or disable it to simulate another UTC date and time
 
@@ -198,7 +222,7 @@ curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
 - The backend serves both the API and the frontend assets.
 - Point data persists in `data/points.json`.
 - Device registrations, requests, and location samples persist in `data/tracking.sqlite3` and are intentionally excluded from Git.
-- The browser keeps the tracking control key in tab-scoped session storage and sends it only as an Authorization header.
+- The browser uses an expiring HttpOnly session cookie. API scripts can continue to use the control key as a Bearer header.
 - Browser geolocation generally requires `https` or `localhost`; insecure remote `http` access may not allow the current-location feature.
 - Location access is requested only after selecting `Find my location`.
 - Attribution is shown in the map UI for OpenFreeMap and OpenStreetMap contributors.

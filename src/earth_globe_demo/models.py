@@ -104,7 +104,7 @@ class DeviceLocation(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     accuracy: float = Field(ge=0, le=100_000)
-    altitude: float | None = None
+    altitude: float | None = Field(default=None, allow_inf_nan=False)
     captured_at: datetime
     received_at: datetime
     source: Literal["current", "cached"]
@@ -130,6 +130,7 @@ class TrackedDevice(BaseModel):
     last_seen_at: datetime | None = None
     latest_location: DeviceLocation | None = None
     active_request: LocationRequest | None = None
+    latest_request: LocationRequest | None = None
 
 
 class LocationCommand(BaseModel):
@@ -143,7 +144,7 @@ class LocationResultCreate(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     accuracy: float = Field(ge=0, le=100_000)
-    altitude: float | None = None
+    altitude: float | None = Field(default=None, allow_inf_nan=False)
     captured_at: datetime
     source: Literal["current", "cached"] = "current"
     is_mock: bool = False

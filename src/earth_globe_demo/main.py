@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api.routes.auth import router as auth_router
 from .api.routes.meta import router as meta_router
 from .api.routes.points import router as points_router
 from .api.routes.tracking import router as tracking_router
@@ -41,7 +42,32 @@ def create_app(
         downloads_dir.mkdir(parents=True, exist_ok=True)
         yield
 
-    app = FastAPI(title=settings.title, description=settings.description, version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title=settings.title, description=settings.description, version="0.4.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin")
+            cross_origin = origin and origin != f"{request.url.scheme}://{request.url.netloc}"
+            if cross_origin or request.headers.get("sec-fetch-site") == "cross-site":
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin changes are not allowed."})
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if request.url.path == "/":
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self' https://unpkg.com; "
+                "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://tiles.openfreemap.org; "
+                "connect-src 'self' https://tiles.openfreemap.org; worker-src 'self' blob:; "
+                "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+            )
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        elif request.url.path == "/" or request.url.path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @app.exception_handler(PointDataError)
     async def point_data_error_handler(_request: Request, exc: PointDataError) -> JSONResponse:
@@ -51,6 +77,7 @@ def create_app(
     async def tracking_data_error_handler(_request: Request, exc: TrackingDataError) -> JSONResponse:
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
+    app.include_router(auth_router, prefix="/api")
     app.include_router(meta_router, prefix="/api")
     app.include_router(points_router, prefix="/api")
     app.include_router(tracking_router, prefix="/api")

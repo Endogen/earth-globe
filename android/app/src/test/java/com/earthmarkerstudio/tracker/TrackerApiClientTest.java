@@ -29,6 +29,13 @@ public final class TrackerApiClientTest {
     }
 
     @Test
+    public void rejectsPublicHostsThatLookLikePrivateAddresses() {
+        for (String host : new String[]{"10.attacker.example", "192.168.attacker.example", "172.16.attacker.example", "10.0.0.999", "010.0.0.1"}) {
+            assertThrows(IOException.class, () -> TrackerApiClient.normalizeServerUrl("http://" + host));
+        }
+    }
+
+    @Test
     public void rejectsAmbiguousOrCredentialBearingAddresses() {
         assertThrows(IOException.class, () -> TrackerApiClient.normalizeServerUrl("tracker.example"));
         assertThrows(IOException.class, () -> TrackerApiClient.normalizeServerUrl("http://fd-example.com"));

@@ -4,7 +4,7 @@ import hashlib
 import secrets
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -62,6 +62,43 @@ class TrackingRepository:
         self._lock = Lock()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
+
+    def check_auth_attempt(self, client: str) -> None:
+        now = _utc_now()
+        with self._locked_connection() as connection:
+            connection.execute("DELETE FROM auth_attempts WHERE expires_at <= ?", (_as_timestamp(now),))
+            row = connection.execute("SELECT attempts FROM auth_attempts WHERE client = ?", (client,)).fetchone()
+            limited = row is not None and row["attempts"] >= 10
+            if not limited:
+                connection.execute(
+                    "INSERT INTO auth_attempts VALUES (?, 1, ?) "
+                    "ON CONFLICT(client) DO UPDATE SET attempts = attempts + 1",
+                    (client, _as_timestamp(now + timedelta(minutes=1))),
+                )
+        if limited:
+            raise HTTPException(429, "Too many attempts. Try again in one minute.", headers={"Retry-After": "60"})
+
+    def create_admin_session(self, admin_token: str) -> str:
+        token = secrets.token_urlsafe(32)
+        now = _utc_now()
+        with self._locked_connection() as connection:
+            connection.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (_as_timestamp(now),))
+            connection.execute(
+                "INSERT INTO admin_sessions VALUES (?, ?, ?)",
+                (_hash_secret(token), _hash_secret(admin_token), _as_timestamp(now + timedelta(hours=8))),
+            )
+        return token
+
+    def valid_admin_session(self, token: str, admin_token: str) -> bool:
+        with closing(self._connect()) as connection:
+            return connection.execute(
+                "SELECT 1 FROM admin_sessions WHERE token_hash = ? AND admin_hash = ? AND expires_at > ?",
+                (_hash_secret(token), _hash_secret(admin_token), _as_timestamp(_utc_now())),
+            ).fetchone() is not None
+
+    def revoke_admin_session(self, token: str) -> None:
+        with self._locked_connection() as connection:
+            connection.execute("DELETE FROM admin_sessions WHERE token_hash = ?", (_hash_secret(token),))
 
     def create_pairing_code(self, device_name: str, valid_for: timedelta = timedelta(minutes=10)) -> PairingCode:
         raw_code = "".join(secrets.choice(PAIRING_ALPHABET) for _ in range(8))
@@ -297,11 +334,22 @@ class TrackingRepository:
 
     def _initialize(self) -> None:
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection, connection:
                 connection.executescript(
                     """
                     PRAGMA journal_mode = WAL;
                     PRAGMA foreign_keys = ON;
+
+                    CREATE TABLE IF NOT EXISTS admin_sessions (
+                        token_hash TEXT PRIMARY KEY,
+                        admin_hash TEXT NOT NULL,
+                        expires_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS auth_attempts (
+                        client TEXT PRIMARY KEY,
+                        attempts INTEGER NOT NULL,
+                        expires_at TEXT NOT NULL
+                    );
 
                     CREATE TABLE IF NOT EXISTS pairing_codes (
                         code_hash TEXT PRIMARY KEY,
@@ -347,11 +395,16 @@ class TrackingRepository:
                         is_mock INTEGER NOT NULL DEFAULT 0
                     );
 
+                    CREATE INDEX IF NOT EXISTS idx_requests_expiry ON location_requests(status, created_at);
+
                     CREATE INDEX IF NOT EXISTS idx_location_requests_device_status
                     ON location_requests(device_id, status, created_at);
 
                     CREATE INDEX IF NOT EXISTS idx_location_samples_device_received
                     ON location_samples(device_id, received_at DESC);
+
+                    CREATE INDEX IF NOT EXISTS idx_location_samples_device_captured
+                    ON location_samples(device_id, captured_at DESC, received_at DESC);
                     """
                 )
             self._path.chmod(0o600)
@@ -368,7 +421,7 @@ class TrackingRepository:
     def _locked_connection(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
             try:
-                with self._connect() as connection:
+                with closing(self._connect()) as connection, connection:
                     connection.execute("BEGIN IMMEDIATE")
                     yield connection
             except HTTPException:
@@ -410,16 +463,12 @@ class TrackingRepository:
 
     def _build_device(self, connection: sqlite3.Connection, row: sqlite3.Row) -> TrackedDevice:
         location_row = connection.execute(
-            "SELECT * FROM location_samples WHERE device_id = ? ORDER BY received_at DESC LIMIT 1",
+            "SELECT * FROM location_samples WHERE device_id = ? ORDER BY captured_at DESC, received_at DESC LIMIT 1",
             (row["id"],),
         ).fetchone()
-        request_row = connection.execute(
-            """
-            SELECT * FROM location_requests
-            WHERE device_id = ? AND status IN (?, ?, ?)
-            ORDER BY created_at DESC LIMIT 1
-            """,
-            (row["id"], *ACTIVE_REQUEST_STATUSES),
+        latest_request_row = connection.execute(
+            "SELECT * FROM location_requests WHERE device_id = ? ORDER BY created_at DESC LIMIT 1",
+            (row["id"],),
         ).fetchone()
         return TrackedDevice(
             id=row["id"],
@@ -429,7 +478,10 @@ class TrackingRepository:
             created_at=_parse_timestamp(row["created_at"]),
             last_seen_at=_parse_timestamp(row["last_seen_at"]),
             latest_location=self._build_location(location_row) if location_row is not None else None,
-            active_request=self._build_request(request_row) if request_row is not None else None,
+            active_request=(self._build_request(latest_request_row)
+                            if latest_request_row is not None and latest_request_row["status"] in ACTIVE_REQUEST_STATUSES
+                            else None),
+            latest_request=self._build_request(latest_request_row) if latest_request_row is not None else None,
         )
 
     @staticmethod

@@ -1068,3 +1068,41 @@ button:disabled {
     display: none;
   }
 }
+
+/* Keep access, feedback, and everyday actions within reach. */
+[hidden] { display: none !important; }
+.workspace-nav { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .9rem; }
+.workspace-nav a { padding: .6rem .7rem; border-radius: .65rem; background: rgba(105,213,255,.08); color: #bceaff; text-decoration: none; font-size: .8rem; }
+.workspace-nav a:hover { background: rgba(105,213,255,.17); }
+.workspace-status { position: sticky; top: 0; z-index: 5; margin: 0; flex-shrink: 0; background: #101e2d; box-shadow: 0 4px 20px #02081280; font-size: .85rem; }
+.access-panel { border-color: rgba(105,213,255,.24); }
+.access-note { color: var(--text-soft); font-size: .78rem; line-height: 1.5; margin: .7rem 0 0; }
+.panel { scroll-margin-top: 6rem; }
+.point-search { margin-top: .9rem; }
+input[type="search"] { width: 100%; min-width: 0; border: 1px solid #ffffff26; border-radius: .78rem; background: #010810cc; color: var(--text-main); padding: .75rem; }
+.point-card, .device-card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+.point-card__title, .device-card__header h3, .selection-chip { overflow-wrap: anywhere; min-width: 0; }
+.point-card__swatch { flex-shrink: 0; }
+.map-error { position: absolute; z-index: 4; top: 7rem; left: 1rem; right: 1rem; padding: 1rem; border: 1px solid #ffc0a9; border-radius: .8rem; background: #172332; line-height: 1.5; }
+.map-error button { display: block; margin-top: .7rem; }
+#clear-all-points { background: transparent; border: 1px solid #ff8b7a66; color: #ffc0a9; box-shadow: none; }
+@media (max-width: 1100px) {
+  .workspace-status { order: 1; top: .4rem; }
+  .sidebar > .access-panel { order: 1 !important; }
+  .panel { scroll-margin-top: 6rem; }
+}
+@media (max-width: 640px) {
+  input[type="text"], input[type="password"], input[type="number"], input[type="search"] { font-size: 16px; }
+  .tracking-toolbar { flex-wrap: wrap; }
+  button, .workspace-nav a { min-height: 44px; }
+}
+
+.device-card__failure { color: #ffb1a6; overflow-wrap: anywhere; }
+
+.access-panel[data-unlocked="true"] .section-heading,
+.access-panel[data-unlocked="true"] .access-note { display: none; }
+.workspace-nav a { padding: .5rem .55rem; font-size: .75rem; }
+
+.interaction-help { margin-top: .75rem; color: var(--text-soft); font-size: .8rem; line-height: 1.5; }
+.interaction-help summary { cursor: pointer; color: #bceaff; }
+.interaction-help summary:focus-visible { outline: 2px solid #67d3ff; outline-offset: 3px; }

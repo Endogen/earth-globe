@@ -16,6 +16,7 @@ export function buildLocationError(error) {
 export class LocationService extends EventTarget {
   constructor() {
     super();
+    this.generation = 0;
     this.watchId = null;
     this.currentLocation = null;
     this.pendingFirstFix = null;
@@ -36,6 +37,9 @@ export class LocationService extends EventTarget {
   }
 
   stopTracking() {
+    this.generation += 1;
+    this.currentLocation = null;
+    this.rejectFirstFix?.(new Error("Location request stopped."));
     if (this.watchId !== null && this.isSupported()) {
       globalThis.navigator.geolocation.clearWatch(this.watchId);
     }
@@ -63,9 +67,10 @@ export class LocationService extends EventTarget {
     });
 
     if (this.watchId === null) {
+      const generation = this.generation;
       this.watchId = globalThis.navigator.geolocation.watchPosition(
-        (position) => this.#handleSuccess(position),
-        (error) => this.#handleError(error),
+        (position) => { if (generation === this.generation) this.#handleSuccess(position); },
+        (error) => { if (generation === this.generation) this.#handleError(error); },
         {
           enableHighAccuracy: false,
           maximumAge: 300_000,

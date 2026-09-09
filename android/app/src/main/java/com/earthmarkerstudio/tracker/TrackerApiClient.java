@@ -79,6 +79,7 @@ final class TrackerApiClient {
     ) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(serverUrl + endpoint).openConnection();
         try {
+            connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod(method);
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(readTimeoutMs);
@@ -127,21 +128,24 @@ final class TrackerApiClient {
         if (lower.equals("localhost")
                 || lower.equals("::1")
                 || lower.endsWith(".local")
-                || lower.startsWith("10.")
-                || lower.startsWith("192.168.")
+
                 || isPrivateIpv6(lower)) {
             return true;
         }
-        if (!lower.startsWith("172.")) {
+        if (!lower.matches("[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+")) {
             return false;
         }
         String[] parts = lower.split("\\.");
-        if (parts.length < 2) {
-            return false;
-        }
+        int[] octets = new int[4];
         try {
-            int secondOctet = Integer.parseInt(parts[1]);
-            return secondOctet >= 16 && secondOctet <= 31;
+            for (int i = 0; i < 4; i++) {
+                if (parts[i].length() > 1 && parts[i].startsWith("0")) return false;
+                octets[i] = Integer.parseInt(parts[i]);
+                if (octets[i] > 255) return false;
+            }
+            return octets[0] == 10 || octets[0] == 127
+                    || (octets[0] == 192 && octets[1] == 168)
+                    || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31);
         } catch (NumberFormatException ignored) {
             return false;
         }

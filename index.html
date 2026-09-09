@@ -22,7 +22,7 @@
       integrity="sha384-MGCxhspF/+ufueUgol3FDkiAYQbpSNRhBT0VWHJt64U8qIy9qlnXWx8LAbj6niPH"
       crossorigin="anonymous"
     />
-    <link rel="stylesheet" href="/assets/styles/app.css?v=0.3.2" />
+    <link rel="stylesheet" href="/assets/styles/app.css?v=0.4.0" />
     <script
       defer
       src="https://unpkg.com/maplibre-gl@5.19.0/dist/maplibre-gl.js"
@@ -46,11 +46,38 @@
           <p class="intro">
             Place, organize, and revisit locations on a living 3D globe.
           </p>
-          <div class="technology-chips" aria-label="Technology stack">
-            <span>FastAPI</span>
-            <span>MapLibre</span>
-            <span>Private device tracking</span>
+          <nav class="workspace-nav" aria-label="Workspace sections">
+            <a href="#editor-panel">Add point</a>
+            <a href="#saved-panel">Saved points</a>
+            <a href="#devices-panel">Devices</a>
+            <a href="#solar-panel">Day &amp; night</a>
+          </nav>
+        </section>
+
+        <p id="status" class="status workspace-status" role="status" aria-live="polite">Loading your globe…</p>
+
+        <section class="panel access-panel" id="access-panel">
+          <div class="section-heading">
+            <p class="section-heading__eyebrow">Private workspace</p>
+            <h2>Workspace access</h2>
+            <p id="access-help">Unlock saved points and Android devices with your server’s control key.</p>
           </div>
+          <form id="tracking-unlock-form" class="tracking-unlock-form">
+            <label>
+              Control key
+              <input id="tracking-token" type="password" required maxlength="512" aria-describedby="access-help" autocomplete="current-password" placeholder="Paste the private control key" />
+            </label>
+            <button id="tracking-unlock" type="submit" class="button-device">Unlock workspace</button>
+          </form>
+
+          <div class="tracking-toolbar" id="workspace-session" hidden>
+
+              <span class="connection-badge" id="tracking-connection-badge" data-state="connected">Control access unlocked</span>
+              <button id="tracking-lock" type="button" class="button-quiet">Lock workspace</button>
+
+
+          </div>
+          <p class="access-note">The key stays out of browser storage. Sessions expire after eight hours.</p>
         </section>
 
         <section class="panel metrics-panel" aria-label="Overview">
@@ -72,7 +99,67 @@
           </div>
         </section>
 
-        <section class="panel solar-panel">
+        <section class="panel" id="editor-panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Editor</p>
+              <h2 id="editor-title">Add Point</h2>
+            </div>
+            <p id="editor-copy">Choose a spot on the globe or enter coordinates, then save it here.</p>
+          </div>
+
+          <details class="interaction-help">
+            <summary>Map shortcuts</summary>
+            <p>Shift-click to save instantly. Click a point to edit it, drag to move it, or Alt-click to remove it.</p>
+          </details>
+          <div id="editor-mode" class="editor-mode">Create mode</div>
+
+          <form id="point-form" class="point-form" tabindex="-1">
+            <label>
+              Label
+              <input id="label" name="label" type="text" maxlength="48" placeholder="Operations hub" autocomplete="off" required />
+            </label>
+            <div class="field-row">
+              <label>
+                Latitude
+                <input id="latitude" name="latitude" type="number" min="-90" max="90" step="0.0001" inputmode="decimal" required />
+              </label>
+              <label>
+                Longitude
+                <input id="longitude" name="longitude" type="number" min="-180" max="180" step="0.0001" inputmode="decimal" required />
+              </label>
+            </div>
+            <label class="color-field">
+              <span>Accent color</span>
+              <span class="color-control">
+                <input id="color" name="color" type="color" value="#ff8d57" />
+                <output id="color-value" for="color">#FF8D57</output>
+              </span>
+            </label>
+            <div class="form-actions">
+              <button id="submit-point" type="submit">Save point</button>
+              <button id="clear-form" type="button" class="button-muted">Clear</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel panel--stretch" id="saved-panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-heading__eyebrow">Collection</p>
+              <h2>Saved Points</h2>
+            </div>
+            <p>Search by label, edit a point, or manage your collection.</p>
+          </div>
+
+          <label class="point-search">Find a saved point
+            <input id="point-search" type="search" placeholder="Search by label…" autocomplete="off" />
+          </label>
+          <p id="search-summary" class="access-note" aria-live="polite"></p>
+          <button id="clear-all-points" type="button" class="button-danger">Remove all saved points</button>
+          <ul id="points-list" class="points-list"></ul>
+        </section>
+        <section class="panel solar-panel" id="solar-panel">
           <div class="section-heading">
             <div>
               <p class="section-heading__eyebrow">Astronomical light</p>
@@ -124,7 +211,7 @@
           </div>
         </section>
 
-        <section class="panel tracking-panel">
+        <section class="panel tracking-panel" id="devices-panel">
           <div class="section-heading">
             <div>
               <p class="section-heading__eyebrow">Private companion</p>
@@ -133,20 +220,8 @@
             <p>Pair your own phone and request a fresh location on demand. Offline requests stay queued for ten minutes.</p>
           </div>
 
-          <form id="tracking-unlock-form" class="tracking-unlock-form">
-            <label>
-              Control key
-              <input id="tracking-token" type="password" autocomplete="current-password" placeholder="Paste the private control key" />
-            </label>
-            <button id="tracking-unlock" type="submit" class="button-device">Unlock devices</button>
-          </form>
-
+          <p id="devices-locked-note" class="access-note">Unlock your workspace above to manage devices.</p>
           <div id="tracking-controls" class="tracking-controls" hidden>
-            <div class="tracking-toolbar">
-              <span class="connection-badge" id="tracking-connection-badge" data-state="connected">Control access unlocked</span>
-              <button id="tracking-lock" type="button" class="button-quiet">Lock</button>
-            </div>
-
             <form id="pair-device-form" class="pair-device-form">
               <label>
                 Device name
@@ -201,59 +276,6 @@
           </div>
         </section>
 
-        <section class="panel">
-          <div class="section-heading">
-            <div>
-              <p class="section-heading__eyebrow">Editor</p>
-              <h2 id="editor-title">Add Point</h2>
-            </div>
-            <p id="editor-copy">Click the globe to prefill coordinates. Shift-click creates instantly. Click a point to edit it, drag it to move it, and Alt-click to remove it.</p>
-          </div>
-
-          <div id="editor-mode" class="editor-mode">Create mode</div>
-
-          <form id="point-form" class="point-form" tabindex="-1">
-            <label>
-              Label
-              <input id="label" name="label" type="text" maxlength="48" placeholder="Operations hub" autocomplete="off" required />
-            </label>
-            <div class="field-row">
-              <label>
-                Latitude
-                <input id="latitude" name="latitude" type="number" min="-90" max="90" step="0.0001" inputmode="decimal" required />
-              </label>
-              <label>
-                Longitude
-                <input id="longitude" name="longitude" type="number" min="-180" max="180" step="0.0001" inputmode="decimal" required />
-              </label>
-            </div>
-            <label class="color-field">
-              <span>Accent color</span>
-              <span class="color-control">
-                <input id="color" name="color" type="color" value="#ff8d57" />
-                <output id="color-value" for="color">#FF8D57</output>
-              </span>
-            </label>
-            <div class="form-actions">
-              <button id="submit-point" type="submit">Save point</button>
-              <button id="clear-form" type="button" class="button-muted">Clear</button>
-            </div>
-          </form>
-        </section>
-
-        <section class="panel panel--stretch">
-          <div class="section-heading">
-            <div>
-              <p class="section-heading__eyebrow">Collection</p>
-              <h2>Saved Points</h2>
-            </div>
-            <p>Edit from the list, drag points on the globe to reposition them, remove them individually, or clear the entire saved set without affecting the live current-location marker.</p>
-          </div>
-
-          <button id="clear-all-points" type="button" class="button-danger">Remove all saved points</button>
-          <p id="status" class="status" role="status" aria-live="polite">Loading configuration…</p>
-          <ul id="points-list" class="points-list"></ul>
-        </section>
       </aside>
 
       <section class="map-shell">
@@ -265,10 +287,15 @@
           <div class="selection-chip" id="selection-chip">No coordinate selected</div>
         </div>
         <div class="map-shell__hint"><span aria-hidden="true">⌁</span> Click the globe to select coordinates. Shift-click saves instantly.</div>
+        <div id="map-error" class="map-error" role="alert" hidden>
+          The map could not load. Check your connection and reload to try again.
+          Your saved points are still available from the editor.
+          <button type="button" id="retry-map" class="button-muted">Reload map</button>
+        </div>
         <div id="map" class="map-canvas" aria-label="Interactive world map"></div>
       </section>
     </main>
 
-    <script type="module" src="/assets/js/main.js?v=0.3.2"></script>
+    <script type="module" src="/assets/js/main.js?v=0.4.0"></script>
   </body>
 </html>

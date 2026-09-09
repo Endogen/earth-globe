@@ -1,17 +1,17 @@
-import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js";
+import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js?v=0.4.0";
 import {
   currentLocationToFeatureCollection,
   emptyFeatureCollection,
   pointsToFeatureCollection,
   trackedDevicesToFeatureCollection
-} from "./geojson.js";
+} from "./geojson.js?v=0.4.0";
 import {
   drawSolarTexture,
   getSolarElevation,
   getSolarPosition,
   SOLAR_TEXTURE_HEIGHT,
   SOLAR_TEXTURE_WIDTH
-} from "./solar.js";
+} from "./solar.js?v=0.4.0";
 
 const SOURCE_ID = "points";
 const HALO_LAYER_ID = "points-halo";
@@ -100,6 +100,12 @@ export class MapController {
     this.solarPosition = getSolarPosition();
     this.solarCanvas = null;
     this.solarTextureFrame = null;
+    this.solarDrawFrame = null;
+    this.deviceSourceKey = null;
+    this.visibilityHandler = () => {
+      window.clearTimeout(this.rotationTimer);
+      if (!document.hidden) this.startRotation();
+    };
   }
 
   async mount(config) {
@@ -140,8 +146,17 @@ export class MapController {
     });
 
     await new Promise((resolve, reject) => {
-      this.map.once("load", resolve);
-      this.map.once("error", (event) => reject(event.error ?? new Error("Map failed to load")));
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.map.off("load", loaded);
+      };
+      const loaded = () => { cleanup(); resolve(); };
+      // Individual tile errors can recover; give the style a bounded time to load.
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("The map did not load within 20 seconds."));
+      }, 20_000);
+      this.map.once("load", loaded);
     });
 
     this.#installSolarLayers();
@@ -150,6 +165,7 @@ export class MapController {
     this.#installTrackedDeviceLayers();
     this.#bindMapInteractions();
     this.#updateAtmosphere();
+    document.addEventListener("visibilitychange", this.visibilityHandler);
     this.startRotation();
   }
 
@@ -161,6 +177,7 @@ export class MapController {
 
   setRotationEnabled(enabled) {
     this.rotationEnabled = enabled;
+    if (this.map) this.startRotation();
   }
 
   setCurrentLocation(location) {
@@ -170,6 +187,9 @@ export class MapController {
 
   setTrackedDevices(devices) {
     this.trackedDevices = devices;
+    const key = JSON.stringify(devices.map(({ id, name, latest_location }) => ({ id, name, latest_location })));
+    if (this.deviceSourceKey === key) return;
+    this.deviceSourceKey = key;
     this.#setTrackedDeviceData(devices);
   }
 
@@ -188,7 +208,7 @@ export class MapController {
     this.map?.easeTo({ zoom: this.map.getZoom() - 0.55, duration: 350 });
   }
 
-  resetView() {
+  resetView({ animate = true } = {}) {
     if (!this.map || !this.defaultView) {
       return;
     }
@@ -198,7 +218,7 @@ export class MapController {
       zoom: this.defaultView.zoom,
       bearing: this.defaultView.bearing,
       pitch: this.defaultView.pitch,
-      duration: 900
+      duration: animate ? 900 : 0
     });
   }
 
@@ -226,12 +246,12 @@ export class MapController {
       center: [point.longitude, point.latitude],
       zoom: Math.max(this.map.getZoom(), 13.8),
       speed: 0.75,
-      essential: true
+      essential: false
     });
 
     this.popup?.remove();
     this.popupPointId = point.id;
-    this.popup = new window.maplibregl.Popup({ offset: 18 })
+    this.popup = new window.maplibregl.Popup({ offset: 18, focusAfterOpen: false })
       .setLngLat([point.longitude, point.latitude])
       .setHTML(this.#popupHtml(point))
       .addTo(this.map);
@@ -252,11 +272,11 @@ export class MapController {
       center: [location.longitude, location.latitude],
       zoom: Math.max(this.map.getZoom(), 14.8),
       speed: 0.75,
-      essential: true
+      essential: false
     });
     this.popup?.remove();
     this.popupPointId = null;
-    this.popup = new window.maplibregl.Popup({ offset: 18 })
+    this.popup = new window.maplibregl.Popup({ offset: 18, focusAfterOpen: false })
       .setLngLat([location.longitude, location.latitude])
       .setHTML(`<strong>${escapeHtml(device.name)}</strong><br /><span>${escapeHtml(
         formatCoordinates(location.latitude, location.longitude)
@@ -278,13 +298,14 @@ export class MapController {
       center: [this.currentLocation.longitude, this.currentLocation.latitude],
       zoom: Math.max(this.map.getZoom(), 14.8),
       speed: 0.75,
-      essential: true
+      essential: false
     });
     return true;
   }
 
   startRotation() {
     window.clearTimeout(this.rotationTimer);
+    if (!this.rotationEnabled || document.hidden) return;
 
     const tick = () => {
       if (!this.map) {
@@ -313,9 +334,12 @@ export class MapController {
     window.clearTimeout(this.rotationTimer);
     window.clearTimeout(this.resumeTimer);
     window.cancelAnimationFrame(this.solarTextureFrame);
+    window.cancelAnimationFrame(this.solarDrawFrame);
+    document.removeEventListener("visibilitychange", this.visibilityHandler);
     this.popup?.remove();
     this.map?.remove();
     this.solarCanvas?.remove();
+    this.map = null;
   }
 
   #installSolarLayers() {
@@ -361,17 +385,20 @@ export class MapController {
       return;
     }
 
-    drawSolarTexture(this.solarCanvas, this.solarPosition);
-    const source = this.map?.getSource(SOLAR_SOURCE_ID);
-    if (!source || typeof source.play !== "function") {
-      this.map?.triggerRepaint();
-      return;
-    }
+    window.cancelAnimationFrame(this.solarDrawFrame);
+    this.solarDrawFrame = window.requestAnimationFrame(() => {
+      drawSolarTexture(this.solarCanvas, this.solarPosition);
+      const source = this.map?.getSource(SOLAR_SOURCE_ID);
+      if (!source || typeof source.play !== "function") {
+        this.map?.triggerRepaint();
+        return;
+      }
 
-    window.cancelAnimationFrame(this.solarTextureFrame);
-    source.play();
-    this.map.triggerRepaint();
-    this.solarTextureFrame = window.requestAnimationFrame(() => source.pause());
+      window.cancelAnimationFrame(this.solarTextureFrame);
+      source.play();
+      this.map.triggerRepaint();
+      this.solarTextureFrame = window.requestAnimationFrame(() => source.pause());
+    });
   }
 
   #installPointLayers() {
@@ -673,6 +700,10 @@ export class MapController {
     const daylight = smoothStep(-12, 6, solarElevation);
     const horizonColor = interpolateColor("#071225", "#8ec9de", daylight);
     const fogColor = interpolateColor("#07101e", "#c4e3e9", daylight);
+
+    const atmosphereKey = `${horizonColor}:${fogColor}`;
+    if (this.atmosphereKey === atmosphereKey) return;
+    this.atmosphereKey = atmosphereKey;
 
     if (typeof this.map.setSky === "function") {
       this.map.setSky({

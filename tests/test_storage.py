@@ -35,3 +35,30 @@ def test_repository_rejects_non_list_root(tmp_path) -> None:
 
     with pytest.raises(PointDataError, match="unreadable"):
         repository.list_points()
+
+
+def test_independent_repositories_do_not_lose_concurrent_writes(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    path = tmp_path / "points.json"
+    repositories = [PointRepository(path) for _ in range(4)]
+
+    def add(index):
+        repositories[index % 4].add_point(PointCreate(label=f"Point {index}", latitude=0, longitude=0))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(add, range(40)))
+    assert len(PointRepository(path).list_points()) == 40
+
+
+def test_point_cache_detects_external_edits(tmp_path) -> None:
+    import json
+
+    path = tmp_path / "points.json"
+    first = PointRepository(path)
+    second = PointRepository(path)
+    assert first.list_points() == []
+    second.add_point(PointCreate(label="New", latitude=0, longitude=0))
+    assert len(first.list_points()) == 1
+    path.write_text(json.dumps([]))
+    assert first.list_points() == []

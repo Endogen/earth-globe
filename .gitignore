@@ -12,3 +12,6 @@ android/.gradle/
 android/local.properties
 android/**/build/
 downloads/*.apk
+
+data/*.lock
+.ruff_cache/

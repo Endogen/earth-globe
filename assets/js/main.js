@@ -1,22 +1,24 @@
-import { ApiClient } from "./api/client.js";
-import { LocationService } from "./location/service.js";
-import { MapController } from "./map/controller.js";
+import { ApiClient } from "./api/client.js?v=0.4.0";
+import { LocationService } from "./location/service.js?v=0.4.0";
+import { MapController } from "./map/controller.js?v=0.4.0";
 import {
   DevicesStore,
   getDeviceRefreshDelay,
   getDeviceRefreshStatus
-} from "./state/devices-store.js?v=0.3.2";
-import { PointsStore } from "./state/points-store.js";
-import { UiController } from "./ui/controller.js";
-import { formatCoordinates } from "./utils/formatters.js";
+} from "./state/devices-store.js?v=0.4.0";
+import { PointsStore } from "./state/points-store.js?v=0.4.0";
+import { UiController } from "./ui/controller.js?v=0.4.0";
+import { formatCoordinates } from "./utils/formatters.js?v=0.4.0";
 
 const apiClient = new ApiClient();
 const locationService = new LocationService();
 const ui = new UiController();
 const pointsStore = new PointsStore(apiClient);
 const devicesStore = new DevicesStore(apiClient);
-const TRACKING_TOKEN_STORAGE_KEY = "earth-globe-tracking-token";
+// Remove credentials saved by older versions; sessions now use an HttpOnly cookie.
+try { globalThis.sessionStorage?.removeItem("earth-globe-tracking-token"); } catch { /* Storage can be blocked. */ }
 ui.setAppReady(false);
+ui.elements.trackingUnlock.disabled = true;
 
 let appConfig = null;
 let currentPoints = [];
@@ -27,10 +29,21 @@ let solarLive = true;
 let solarTimer = null;
 let deviceRefreshTimer = null;
 let trackingUnlocked = false;
+let accessGeneration = 0;
+const accessChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("earth-workspace-access") : null;
+accessChannel?.addEventListener("message", () => {
+  clearWorkspaceAccess();
+  ui.setStatus("Workspace locked in another tab.");
+});
+apiClient.addEventListener("unauthorized", () => {
+  clearWorkspaceAccess();
+  ui.setStatus("Your session expired. Unlock the workspace to continue.", "error");
+});
 
 const mapController = new MapController({
   containerId: "map",
   onCoordinatePick: ({ latitude, longitude }) => {
+    if (!trackingUnlocked) { ui.setStatus("Unlock the workspace to save a location."); return; }
     ui.prefillCoordinates({ latitude, longitude });
     ui.setStatus(`Coordinates selected: ${formatCoordinates(latitude, longitude)}. Review the form and save when ready.`);
   },
@@ -130,7 +143,7 @@ ui.bind({
     await unlockTracking(token, true);
   },
   onLockTracking: () => {
-    lockTracking();
+    return lockTracking();
   },
   onCreatePairingCode: async (deviceName) => {
     await createDevicePairingCode(deviceName);
@@ -155,12 +168,11 @@ bootstrap().catch((error) => {
 });
 
 async function bootstrap() {
-  ui.setStatus("Loading configuration and points…");
+  ui.setStatus("Loading your globe…");
   let trackingStatus;
   [appConfig, trackingStatus] = await Promise.all([
     apiClient.getConfig(),
-    apiClient.getTrackingStatus(),
-    pointsStore.load()
+    apiClient.getTrackingStatus()
   ]);
 
   const prefersReducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -172,14 +184,24 @@ async function bootstrap() {
     }
   };
 
+  ui.elements.trackingUnlock.disabled = false;
   ui.setMapTitle(`${appConfig.app_title} · Globe`);
   ui.exitEditMode(appConfig.default_point_color);
   ui.elements.rotateToggle.checked = mapConfig.rotation.enabled;
 
-  await mapController.mount(mapConfig);
+  ui.setAppReady(true);
+  ui.setTrackingLocked(true);
+  const mapReady = mapController.mount(mapConfig).then(() => {
+    mapController.setPoints(currentPoints);
+    mapController.deviceSourceKey = null;
+    mapController.setTrackedDevices(currentDevices);
+    setSolarLive(true);
+  }).catch((error) => {
+    ui.setStatus(`Map unavailable: ${error.message}. You can still use the point editor.`, "error");
+    document.getElementById("map-error").hidden = false;
+  });
   mapController.setPoints(currentPoints);
   mapController.setTrackedDevices(currentDevices);
-  setSolarLive(true);
   bindLocationUpdates();
   ui.setAppReady(true);
   ui.setCurrentLocationButtonState({
@@ -191,63 +213,70 @@ async function bootstrap() {
   ui.setTrackingLocked(true);
   document.addEventListener("visibilitychange", handleTrackingVisibilityChange);
 
-  const savedTrackingToken = globalThis.sessionStorage?.getItem(TRACKING_TOKEN_STORAGE_KEY) ?? "";
-  if (savedTrackingToken) {
-    await unlockTracking(savedTrackingToken, false);
+  try {
+    await apiClient.getSession();
+    await unlockTracking("", false);
+  } catch (error) {
+    ui.setStatus(error.status === 401 ? "Explore the globe, or unlock to access saved points and devices." : error.message);
   }
-
-  ui.setStatus(
-    prefersReducedMotion
-      ? "Map ready. Auto-rotate is paused to respect your reduced-motion preference."
-      : "Map ready. Select a coordinate or add a saved point to begin.",
-    "success"
-  );
+  await mapReady;
 }
 
 async function unlockTracking(token, reportError) {
-  const normalizedToken = token.trim();
-  if (!normalizedToken) {
-    if (reportError) {
-      ui.setStatus("Enter the private device-tracking control key.", "error");
-    }
-    return false;
-  }
-
-  apiClient.setTrackingToken(normalizedToken);
+  const generation = ++accessGeneration;
   try {
-    await devicesStore.load();
+    if (reportError) await apiClient.unlock(token.trim());
+    await Promise.all([devicesStore.load(), pointsStore.load()]);
+    if (generation !== accessGeneration) return false;
     trackingUnlocked = true;
-    globalThis.sessionStorage?.setItem(TRACKING_TOKEN_STORAGE_KEY, normalizedToken);
     ui.setTrackingLocked(false);
-    ui.setTrackingConnection({ connected: true, message: "Control access unlocked" });
-    ui.setTrackingStatus(
-      currentDevices.length
-        ? `${currentDevices.length} paired device${currentDevices.length === 1 ? "" : "s"}. Waiting for requests.`
-        : "Ready to pair your first Android device."
-    );
-    ui.setStatus("Private Android device controls unlocked for this browser tab.", "success");
+    ui.setTrackingConnection({ connected: true, message: "Workspace unlocked" });
+    ui.setTrackingStatus(currentDevices.length ? "Choose a device to request its location." : "Create a pairing code to add your Android phone.");
+    ui.setStatus("Workspace unlocked. Your session lasts up to eight hours.", "success");
     scheduleDeviceRefresh();
     return true;
   } catch (error) {
-    apiClient.setTrackingToken("");
-    trackingUnlocked = false;
-    globalThis.sessionStorage?.removeItem(TRACKING_TOKEN_STORAGE_KEY);
-    ui.setTrackingLocked(true);
-    if (reportError) {
-      ui.setStatus(error.message || "The device controls could not be unlocked.", "error");
+    if (generation === accessGeneration) {
+      clearWorkspaceAccess();
+      if (reportError) ui.setStatus(error.message || "The workspace could not be unlocked.", "error");
     }
     return false;
   }
 }
 
-function lockTracking() {
+function clearWorkspaceAccess() {
+  accessGeneration += 1;
   trackingUnlocked = false;
   window.clearTimeout(deviceRefreshTimer);
-  apiClient.setTrackingToken("");
-  globalThis.sessionStorage?.removeItem(TRACKING_TOKEN_STORAGE_KEY);
+  apiClient.cancelPending();
   devicesStore.clear();
+  pointsStore.reset();
+  mapController.popup?.remove();
+  mapController.resetView({ animate: false });
+  locationService.stopTracking();
+  currentLocation = null;
+  mapController.setCurrentLocation(null);
+  ui.setCurrentLocationButtonState({
+    disabled: !locationService.isSupported() || !locationService.isSecureContext(),
+    available: false,
+    message: getLocationUnavailableMessage()
+  });
+  exitEditMode();
   ui.setTrackingLocked(true);
-  ui.setStatus("Device controls locked for this browser tab.");
+}
+
+async function lockTracking() {
+  clearWorkspaceAccess();
+  try {
+    await apiClient.lock();
+    accessChannel?.postMessage("locked");
+    ui.setStatus("Workspace locked. The session has been revoked.");
+  } catch (error) {
+    ui.setStatus("Data hidden, but the server could not revoke this session. Reconnect and use Lock again.", "error");
+    ui.setTrackingConnection({ connected: false, message: "Lock needs retry" });
+    document.getElementById("workspace-session").hidden = false;
+    ui.elements.trackingLock.hidden = false;
+  }
 }
 
 function scheduleDeviceRefresh(delay = null) {
@@ -261,12 +290,14 @@ function scheduleDeviceRefresh(delay = null) {
       hidden: document.hidden,
       hasActiveRequest: currentDevices.some((device) => device.active_request)
     });
+  const generation = accessGeneration;
   deviceRefreshTimer = window.setTimeout(async () => {
     try {
       const previousDeviceCount = currentDevices.length;
       const hadActiveRequest = currentDevices.some((device) => device.active_request);
       await devicesStore.load();
-      ui.setTrackingConnection({ connected: true, message: "Control access unlocked" });
+      if (generation !== accessGeneration) return;
+      ui.setTrackingConnection({ connected: true, message: "Workspace unlocked" });
       const refreshStatus = getDeviceRefreshStatus({
         hadActiveRequest,
         hasActiveRequest: currentDevices.some((device) => device.active_request),
@@ -278,7 +309,8 @@ function scheduleDeviceRefresh(delay = null) {
       }
       scheduleDeviceRefresh();
     } catch (error) {
-      const authenticationFailed = /control key|credential|required/i.test(error.message ?? "");
+      if (generation !== accessGeneration) return;
+      const authenticationFailed = error.status === 401;
       if (authenticationFailed) {
         lockTracking();
         ui.setStatus("The device-tracking control key is no longer valid.", "error");
@@ -298,6 +330,7 @@ function scheduleDeviceRefresh(delay = null) {
 }
 
 function handleTrackingVisibilityChange() {
+  if (!document.hidden && solarLive) updateSolarCycle(new Date());
   if (trackingUnlocked) {
     scheduleDeviceRefresh(document.hidden ? null : 0);
   }
@@ -398,7 +431,7 @@ function scheduleSolarUpdate() {
     if (!solarLive) {
       return;
     }
-    updateSolarCycle(new Date());
+    if (!document.hidden) updateSolarCycle(new Date());
     scheduleSolarUpdate();
   }, millisecondsUntilNextMinute);
 }
@@ -418,12 +451,14 @@ function validatePayload(payload) {
 }
 
 async function createPoint(payload, successMessage) {
+  if (!trackingUnlocked) { ui.setStatus("Unlock the workspace to save a location."); return; }
   if (!validatePayload(payload)) {
     return;
   }
 
   try {
     const point = await pointsStore.add(payload);
+    if (!point || !trackingUnlocked) return;
     exitEditMode();
     ui.prefillCoordinates({ latitude: point.latitude, longitude: point.longitude });
     ui.setStatus(successMessage, "success");
@@ -439,6 +474,7 @@ async function updatePoint(pointId, payload) {
 
   try {
     const point = await pointsStore.update(pointId, payload);
+    if (!point || !trackingUnlocked) return;
     enterEditMode(point, false);
     ui.setStatus(`Updated ${point.label} at ${formatCoordinates(point.latitude, point.longitude)}.`, "success");
   } catch (error) {
@@ -461,6 +497,7 @@ async function movePoint(pointId, latitude, longitude) {
       longitude
     });
 
+    if (!updated || !trackingUnlocked) return;
     if (editingPointId === updated.id) {
       enterEditMode(updated, false);
     } else {
@@ -491,6 +528,7 @@ function enterEditMode(point, focusMap) {
   if (focusMap) {
     mapController.focusPoint(point);
   }
+  ui.elements.label.focus();
   ui.setStatus(`Editing ${point.label}. Drag the point or update the form, then save your changes.`);
 }
 
@@ -503,6 +541,7 @@ function exitEditMode() {
 async function removePoint(pointId, successMessage) {
   try {
     const removed = await pointsStore.remove(pointId);
+    if (!removed || !trackingUnlocked) return;
     if (editingPointId === pointId) {
       exitEditMode();
     }
@@ -533,6 +572,7 @@ function bindLocationUpdates() {
 }
 
 async function startLocationTracking({ reportErrors, showBusy }) {
+  const generation = accessGeneration;
   try {
     ui.setCurrentLocationButtonState({
       disabled: !locationService.isSupported() || !locationService.isSecureContext(),
@@ -542,11 +582,13 @@ async function startLocationTracking({ reportErrors, showBusy }) {
     });
 
     const location = await locationService.ensureTracking();
+    if (generation !== accessGeneration) return null;
     currentLocation = location;
     mapController.setCurrentLocation(location);
     ui.setCurrentLocationButtonState({ available: true });
     return location;
   } catch (error) {
+    if (generation !== accessGeneration) return null;
     ui.setCurrentLocationButtonState({
       disabled: !locationService.isSupported() || !locationService.isSecureContext(),
       available: false,
@@ -563,6 +605,7 @@ async function startLocationTracking({ reportErrors, showBusy }) {
 async function centerOnCurrentLocation() {
   try {
     const location = await startLocationTracking({ reportErrors: true, showBusy: true });
+    if (!location) return;
     const centered = mapController.centerOnCurrentLocation();
     if (!centered) {
       ui.setStatus("Current location is not available yet.", "error");
@@ -589,6 +632,7 @@ async function clearAllPoints() {
 
   try {
     const result = await pointsStore.clear();
+    if (!result || !trackingUnlocked) return;
     if (editingPointId) {
       exitEditMode();
     }

@@ -78,8 +78,10 @@ def request_device_location(
 @router.post("/device/register", response_model=DeviceCredentials, status_code=status.HTTP_201_CREATED)
 def register_device(
     payload: DeviceRegistration,
+    request: Request,
     repository: TrackingRepository = Depends(get_tracking_repository),
 ) -> DeviceCredentials:
+    repository.check_auth_attempt("pair:" + (request.client.host if request.client else "unknown"))
     return repository.register_device(payload)
 
 

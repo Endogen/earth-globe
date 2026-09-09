@@ -1,17 +1,35 @@
-import { formatApiErrorDetail } from "../utils/formatters.js";
+import { formatApiErrorDetail } from "../utils/formatters.js?v=0.4.0";
 
 const JSON_HEADERS = {
   Accept: "application/json"
 };
 
-export class ApiClient {
+export class ApiClient extends EventTarget {
   constructor(baseUrl = "/api") {
+    super();
     this.baseUrl = baseUrl;
-    this.trackingToken = "";
+    this.pendingRequests = new Set();
   }
 
-  setTrackingToken(token) {
-    this.trackingToken = token.trim();
+  cancelPending() {
+    for (const controller of this.pendingRequests) controller.abort();
+    this.pendingRequests.clear();
+  }
+
+  async unlock(controlKey) {
+    return this.#request("/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ control_key: controlKey })
+    });
+  }
+
+  async getSession() {
+    return this.#request("/auth/session");
+  }
+
+  async lock() {
+    return this.#request("/auth/session", { method: "DELETE" });
   }
 
   async getConfig() {
@@ -83,35 +101,34 @@ export class ApiClient {
   }
 
   async #trackingRequest(path, options = {}) {
-    if (!this.trackingToken) {
-      throw new Error("Enter the device-tracking control key first.");
-    }
-    return this.#request(path, {
-      ...options,
-      headers: {
-        ...(options.headers ?? {}),
-        Authorization: `Bearer ${this.trackingToken}`
-      }
-    });
+    return this.#request(path, options);
   }
 
   async #request(path, options = {}) {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers: {
-        ...JSON_HEADERS,
-        ...(options.headers ?? {})
+    const controller = new AbortController();
+    this.pendingRequests.add(controller);
+    const timeout = setTimeout(() => controller.abort(new Error("The server took too long. Please try again.")), 15_000);
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...options,
+        signal: controller.signal,
+        credentials: "same-origin",
+        headers: { ...JSON_HEADERS, ...(options.headers ?? {}) }
+      });
+      const contentType = response.headers.get("content-type") ?? "";
+      const payload = response.status === 204 ? null : contentType.includes("application/json")
+        ? await response.json() : await response.text();
+      if (!response.ok) {
+        const detail = typeof payload === "object" ? payload?.detail : payload;
+        const error = new Error(formatApiErrorDetail(detail) || `Request failed with status ${response.status}`);
+        error.status = response.status;
+        if (response.status === 401 && path !== "/auth/session") this.dispatchEvent(new Event("unauthorized"));
+        throw error;
       }
-    });
-
-    const contentType = response.headers.get("content-type") ?? "";
-    const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-
-    if (!response.ok) {
-      const detail = typeof payload === "object" ? payload?.detail : payload;
-      throw new Error(formatApiErrorDetail(detail) || `Request failed with status ${response.status}`);
+      return payload;
+    } finally {
+      clearTimeout(timeout);
+      this.pendingRequests.delete(controller);
     }
-
-    return payload;
   }
 }

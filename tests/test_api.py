@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from stat import S_IMODE
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from earth_globe_demo import tracking
@@ -59,6 +60,7 @@ def test_health_and_config(client: TestClient) -> None:
 
 
 def test_point_crud_normalizes_labels(client: TestClient) -> None:
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN}).status_code == 204
     create_response = client.post(
         "/api/points",
         json={"label": "  Berlin Hub  ", "latitude": 52.52, "longitude": 13.405, "color": "#67d3ff"},
@@ -91,18 +93,21 @@ def test_point_crud_normalizes_labels(client: TestClient) -> None:
     ],
 )
 def test_invalid_points_are_rejected(client: TestClient, payload: dict[str, object]) -> None:
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN}).status_code == 204
     response = client.post("/api/points", json=payload)
     assert response.status_code == 422
     assert client.get("/api/points").json() == []
 
 
 def test_missing_point_returns_not_found(client: TestClient) -> None:
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN}).status_code == 204
     payload = {"label": "Missing", "latitude": 0, "longitude": 0, "color": "#ff8d57"}
     assert client.put("/api/points/does-not-exist", json=payload).status_code == 404
     assert client.delete("/api/points/does-not-exist").status_code == 404
 
 
 def test_clear_points_reports_removed_count(client: TestClient) -> None:
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN}).status_code == 204
     payload = {"label": "Point", "latitude": 0, "longitude": 0, "color": "#ff8d57"}
     client.post("/api/points", json=payload)
     client.post("/api/points", json={**payload, "label": "Point 2"})
@@ -266,3 +271,126 @@ def test_captured_location_is_accepted_after_request_timeout(tmp_path, monkeypat
 
     assert location.latitude == 52.52
     assert repository.get_device(credentials.device_id).latest_location == location
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/points"), ("POST", "/api/points"), ("DELETE", "/api/points"),
+    ("PUT", "/api/points/id"), ("DELETE", "/api/points/id"),
+])
+def test_points_require_authentication(client: TestClient, method: str, path: str) -> None:
+    response = client.request(method, path)
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_session_cookie_expiry_rotation_and_revocation(client: TestClient, monkeypatch) -> None:
+    now = datetime.now(UTC)
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now)
+    response = client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN})
+    assert response.status_code == 204
+    cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "SameSite=strict" in cookie and "Max-Age=28800" in cookie
+    token = client.cookies.get("earth_session")
+    assert ADMIN_TOKEN not in cookie
+    assert client.get("/api/points").status_code == 200
+    assert client.get("/api/devices").status_code == 200
+    repository = client.app.state.tracking_repository
+    assert repository.valid_admin_session(token, ADMIN_TOKEN)
+    assert not repository.valid_admin_session(token, "a-new-control-key")
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now + timedelta(hours=9))
+    assert client.get("/api/points").status_code == 401
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now)
+    assert client.delete("/api/auth/session").status_code == 204
+    assert not repository.valid_admin_session(token, ADMIN_TOKEN)
+    assert client.get("/api/points").status_code == 401
+
+
+def test_cross_origin_writes_rejected_and_bearer_clients_work(client: TestClient) -> None:
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN},
+                       headers={"Origin": "https://untrusted.example"}).status_code == 403
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN},
+                       headers={"Origin": "http://testserver"}).status_code == 204
+    assert client.delete("/api/points", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    client.cookies.clear()
+    assert client.get("/api/points", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).status_code == 200
+
+
+def test_login_and_pairing_rate_limits_expire(client: TestClient, monkeypatch) -> None:
+    now = datetime.now(UTC)
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now)
+    for _ in range(10):
+        assert client.post("/api/auth/session", json={"control_key": "wrong"}).status_code == 401
+    response = client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN})
+    assert response.status_code == 429 and response.headers["retry-after"] == "60"
+    for _ in range(10):
+        assert client.post("/api/device/register", json={"pairing_code": "ABCDEFGH", "device_name": "Test"}).status_code == 400
+    assert client.post("/api/device/register", json={"pairing_code": "ABCDEFGH", "device_name": "Test"}).status_code == 429
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now + timedelta(seconds=61))
+    assert client.post("/api/auth/session", json={"control_key": ADMIN_TOKEN}).status_code == 204
+
+
+def test_security_headers_and_https_cookie(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    response = client.post("https://testserver/api/auth/session", json={"control_key": ADMIN_TOKEN})
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_tracking_connections_are_closed(tmp_path, monkeypatch) -> None:
+    import sqlite3
+
+    repository = TrackingRepository(tmp_path / "tracking.sqlite3")
+    connections = []
+    connect = repository._connect
+
+    def record_connection():
+        connection = connect()
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", record_connection)
+    repository.list_devices()
+    with pytest.raises(HTTPException):
+        repository.authenticate_device("invalid")
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connection.execute("SELECT 1")
+
+
+def test_delayed_upload_does_not_replace_a_newer_device_fix(tmp_path, monkeypatch) -> None:
+    repository = TrackingRepository(tmp_path / "tracking.sqlite3")
+    now = datetime.now(UTC)
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now)
+    code = repository.create_pairing_code("Phone")
+    credentials = repository.register_device(DeviceRegistration(pairing_code=code.code, device_name="Phone"))
+    first = repository.create_location_request(credentials.device_id)
+    later = now + REQUEST_TIMEOUT + timedelta(seconds=1)
+    monkeypatch.setattr(tracking, "_utc_now", lambda: later)
+    second = repository.create_location_request(credentials.device_id)
+    repository.save_location(credentials.device_id, LocationResultCreate(
+        request_id=second.id, latitude=20, longitude=30, accuracy=5, captured_at=later,
+    ))
+    monkeypatch.setattr(tracking, "_utc_now", lambda: later + timedelta(seconds=5))
+    repository.save_location(credentials.device_id, LocationResultCreate(
+        request_id=first.id, latitude=10, longitude=10, accuracy=5, captured_at=now,
+    ))
+    device = repository.get_device(credentials.device_id)
+    assert device.latest_location.latitude == 20
+    assert device.latest_request.id == second.id
+
+
+def test_timed_out_requests_remain_visible_to_the_operator(tmp_path, monkeypatch) -> None:
+    repository = TrackingRepository(tmp_path / "tracking.sqlite3")
+    now = datetime.now(UTC)
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now)
+    pairing = repository.create_pairing_code("Phone")
+    credentials = repository.register_device(DeviceRegistration(pairing_code=pairing.code, device_name="Phone"))
+    repository.create_location_request(credentials.device_id)
+    monkeypatch.setattr(tracking, "_utc_now", lambda: now + REQUEST_TIMEOUT + timedelta(seconds=1))
+    device = repository.list_devices()[0]
+    assert device.active_request is None
+    assert device.latest_request.status == "timed_out"
+    assert device.latest_request.error

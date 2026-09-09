@@ -5,10 +5,10 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from threading import Lock
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from filelock import FileLock
 from pydantic import ValidationError
 
 from .models import Point, PointCreate, PointUpdate
@@ -21,8 +21,12 @@ class PointDataError(RuntimeError):
 class PointRepository:
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._lock = Lock()
-        self._ensure_data_file()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = FileLock(str(path) + ".lock")
+        self._cached_signature = None
+        self._cached_points: list[Point] = []
+        with self._lock:
+            self._ensure_data_file()
 
     def list_points(self) -> list[Point]:
         with self._lock:
@@ -97,10 +101,17 @@ class PointRepository:
 
     def _read_points_unlocked(self) -> list[Point]:
         try:
+            stat = self._path.stat()
+            signature = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+            if signature == self._cached_signature:
+                return list(self._cached_points)
             raw = json.loads(self._path.read_text(encoding="utf-8"))
             if not isinstance(raw, list):
                 raise ValueError("The point store root must be a JSON array")
-            return [Point.model_validate(item) for item in raw]
+            points = [Point.model_validate(item) for item in raw]
+            self._cached_signature = signature
+            self._cached_points = points
+            return list(points)
         except (OSError, UnicodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
             raise PointDataError("Saved point data is unreadable. Restore or replace data/points.json.") from exc
 

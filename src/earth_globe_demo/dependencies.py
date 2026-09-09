@@ -27,9 +27,16 @@ def require_tracking_admin(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> None:
-    supplied_token = _bearer_token(authorization)
-    if not hmac.compare_digest(supplied_token, request.app.state.tracking_admin_token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid control key")
+    repository = request.app.state.tracking_repository
+    if authorization:
+        supplied_token = _bearer_token(authorization)
+        if hmac.compare_digest(supplied_token.encode(), request.app.state.tracking_admin_token.encode()):
+            return
+    else:
+        token = request.cookies.get("earth_session", "")
+        if token and repository.valid_admin_session(token, request.app.state.tracking_admin_token):
+            return
+    raise HTTPException(401, "Unlock the workspace with your control key.", headers={"WWW-Authenticate": "Bearer"})
 
 
 def authenticate_device(
