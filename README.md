@@ -1,6 +1,10 @@
 # Earth Marker Studio
 
-Professional globe-based point editor with:
+A private, self-hosted globe for placing and managing points, locating your own Android devices on demand, and watching the real day/night cycle move across a photographic Earth.
+
+![Earth Marker Studio showing the globe at dusk over Europe and Africa, with the workspace side panel](docs/screenshots/app-overview.png)
+
+## Features
 
 - Python backend using FastAPI
 - MapLibre GL JS front end with globe projection
@@ -20,7 +24,7 @@ Professional globe-based point editor with:
 - searchable saved points, visible request failures, and keyboard-friendly editor navigation
 - cached point reads, cross-process write locks, and map rendering that pauses when hidden
 - a sideloadable Android companion with a visible foreground connection and durable result retries
-- Python API tests, JavaScript utility tests, and Android JVM tests
+- Python API tests, JavaScript unit tests, and Android JVM tests
 
 ## Stack
 
@@ -43,6 +47,8 @@ Professional globe-based point editor with:
 │   └── app/
 ├── data/
 │   └── points.json
+├── docs/
+│   └── screenshots/
 ├── downloads/
 ├── scripts/
 │   ├── build_android.sh
@@ -135,7 +141,7 @@ The foreground connection and retry protocol are designed for reliable personal 
 
 ## Workspace access and upgrades
 
-Version 0.4 protects **all** point reads and writes with the same control key used for device administration. Reload the browser after updating to load the versioned frontend modules. Existing point files and device registrations continue to work. API scripts must now include `Authorization: Bearer <control-key>` for `/api/points`.
+Since version 0.4, **all** point reads and writes are protected by the same control key used for device administration, so API scripts must include `Authorization: Bearer <control-key>` for `/api/points`. Version 0.5 replaces the day/night overlay with the GPU globe layer described below and needs no data migration. After any update, reload the browser to load the new versioned frontend modules; existing point files and device registrations continue to work.
 
 The browser exchanges the control key for a random session cookie; the key is cleared from the form and never written to browser storage. Sessions are stored as hashes in SQLite, expire after eight hours, and use `HttpOnly`, `SameSite=Strict`, and `Secure` on HTTPS. Lock revokes the session and clears visible points, device details, browser geolocation, and the selected map view. Other open tabs are notified. Changing the server control key and restarting invalidates sessions issued under the old key.
 
@@ -147,6 +153,8 @@ Point storage uses cross-process file locks on a local filesystem and an atomic 
 
 ## Globe rendering
 
+![Pitched view at dusk: daylit Sahara and Atlantic sun glint on the left, city lights of the Nile, Middle East and Europe on the night side, and the sun-lit atmosphere along the horizon](docs/screenshots/globe-terminator.png)
+
 `assets/js/map/earth-layer.js` is a MapLibre custom WebGL layer drawn above the base map and below labels. While MapLibre renders the globe, it draws a full latitude/longitude sphere (so the polar caps beyond Web Mercator's ±85.05° are lit correctly). Once MapLibre switches to flat rendering at high zoom, it instead shades every screen pixel by intersecting its camera ray with the ground, using a projection re-based on the view centre in float64; a world-spanning mesh cannot be projected precisely enough in float32 at street level and would leave the far edge of pitched views unshaded. Both paths share one lighting function, which blends:
 
 - satellite imagery at low zoom, fading out between zoom 3.2 and 5 in favour of the vector map
@@ -155,7 +163,9 @@ Point storage uses cross-process file locks on a local filesystem and an atomic 
 - a specular sun glint on water, masked to oceans and lakes
 - a ray-marched atmosphere lit by the Sun (so the limb is only bright where it is day), faint night-side airglow, and stars fixed to Greenwich sidereal time
 
-Textures are decoded off the main thread with `createImageBitmap`. The equirectangular textures in `assets/textures` are generated from public-domain sources (NASA Blue Marble Next Generation, NASA Black Marble 2016, Natural Earth 1:50m land and lakes). Rebuild them with:
+From orbit the globe is label-free: country, ocean, and city labels of the default style fade in between zoom 2.2 and 4.4. Auto-rotation advances the camera every animation frame, pauses while you drag, zoom, or fly to a place, resumes just under a second after you let go, and eases back up to full speed instead of jumping.
+
+Textures are decoded off the main thread with `createImageBitmap` and are served by the app itself from `assets/textures` rather than fetched from an external imagery service. The equirectangular textures in `assets/textures` are generated from public-domain sources (NASA Blue Marble Next Generation, NASA Black Marble 2016, Natural Earth 1:50m land and lakes). Rebuild them with:
 
 ```bash
 uv run --with pillow python scripts/build_globe_textures.py
@@ -164,7 +174,7 @@ uv run --with pillow python scripts/build_globe_textures.py
 ## Quality checks
 
 ```bash
-uv run ruff check src tests
+uv run ruff check .
 uv run pytest
 npm test
 uv run python scripts/benchmark_storage.py
@@ -190,6 +200,7 @@ cd android && ./gradlew assembleDebug lintDebug testDebugUnitTest
 - `DELETE /api/devices/{device_id}` (control key)
 - `POST /api/device/register` (one-time pairing code)
 - `GET /api/device/commands` (device credential, long poll)
+- `POST /api/device/location-requests/{request_id}/locating` (device credential)
 - `POST /api/device/location-results` (device credential)
 - `POST /api/device/location-failures` (device credential)
 
