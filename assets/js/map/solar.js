@@ -2,9 +2,6 @@ const MILLISECONDS_PER_DAY = 86_400_000;
 const JULIAN_UNIX_EPOCH = 2_440_587.5;
 const JULIAN_J2000 = 2_451_545;
 
-export const SOLAR_TEXTURE_WIDTH = 720;
-export const SOLAR_TEXTURE_HEIGHT = 360;
-
 function toRadians(value) {
   return (value * Math.PI) / 180;
 }
@@ -21,9 +18,13 @@ function normalizeLongitude(value) {
   return ((value + 180) % 360 + 360) % 360 - 180;
 }
 
-function smoothStep(minimum, maximum, value) {
+export function smoothStep(minimum, maximum, value) {
   const position = Math.min(1, Math.max(0, (value - minimum) / (maximum - minimum)));
   return position * position * (3 - 2 * position);
+}
+
+function julianDay(date) {
+  return date.getTime() / MILLISECONDS_PER_DAY + JULIAN_UNIX_EPOCH;
 }
 
 function validDate(value) {
@@ -36,8 +37,7 @@ function validDate(value) {
 
 export function getSolarPosition(value = new Date()) {
   const date = validDate(value);
-  const julianDay = date.getTime() / MILLISECONDS_PER_DAY + JULIAN_UNIX_EPOCH;
-  const julianCentury = (julianDay - JULIAN_J2000) / 36_525;
+  const julianCentury = (julianDay(date) - JULIAN_J2000) / 36_525;
 
   const geometricMeanLongitude = normalizeDegrees(
     280.46646 + julianCentury * (36_000.76983 + julianCentury * 0.0003032)
@@ -105,78 +105,27 @@ export function getSolarElevation(solarPosition, latitude, longitude) {
   return toDegrees(Math.asin(Math.min(1, Math.max(-1, altitudeSine))));
 }
 
-export function getNightOpacity(solarElevation) {
-  if (solarElevation >= 0) {
-    return 0;
-  }
-
-  const darknessDepth = Math.min(90, -solarElevation);
-  if (darknessDepth <= 18) {
-    return 0.58 * smoothStep(0, 18, darknessDepth);
-  }
-
-  return 0.58 + 0.2 * smoothStep(18, 60, darknessDepth);
-}
-
-function getNightColor(solarElevation) {
-  const nightProgress = smoothStep(0, 24, Math.max(0, -solarElevation));
+/**
+ * Unit vector from the Earth's centre towards a geographic coordinate, in the globe's
+ * Earth-fixed frame: +y is north, +z crosses the prime meridian and +x points to 90°E.
+ */
+export function getSurfaceVector(latitude, longitude) {
+  const latitudeRadians = toRadians(latitude);
+  const longitudeRadians = toRadians(longitude);
+  const cosLatitude = Math.cos(latitudeRadians);
   return [
-    Math.round(15 + (1 - 15) * nightProgress),
-    Math.round(33 + (5 - 33) * nightProgress),
-    Math.round(56 + (14 - 56) * nightProgress)
+    Math.sin(longitudeRadians) * cosLatitude,
+    Math.sin(latitudeRadians),
+    Math.cos(longitudeRadians) * cosLatitude
   ];
 }
 
-export function createSolarTextureData(
-  solarPosition,
-  width = SOLAR_TEXTURE_WIDTH,
-  height = SOLAR_TEXTURE_HEIGHT
-) {
-  const textureWidth = Math.max(2, Math.floor(Number(width)) || SOLAR_TEXTURE_WIDTH);
-  const textureHeight = Math.max(2, Math.floor(Number(height)) || SOLAR_TEXTURE_HEIGHT);
-  const pixels = new Uint8ClampedArray(textureWidth * textureHeight * 4);
-  const declinationRadians = toRadians(solarPosition.latitude);
-  const sinDeclination = Math.sin(declinationRadians);
-  const cosDeclination = Math.cos(declinationRadians);
-  const longitudeCosines = new Float64Array(textureWidth);
-
-  for (let x = 0; x < textureWidth; x += 1) {
-    const longitude = -180 + ((x + 0.5) / textureWidth) * 360;
-    longitudeCosines[x] = Math.cos(toRadians(normalizeLongitude(longitude - solarPosition.longitude)));
-  }
-
-  for (let y = 0; y < textureHeight; y += 1) {
-    const mercatorY = (y + 0.5) / textureHeight;
-    const latitudeRadians = Math.atan(Math.sinh(Math.PI * (1 - 2 * mercatorY)));
-    const sinLatitude = Math.sin(latitudeRadians);
-    const cosLatitude = Math.cos(latitudeRadians);
-
-    for (let x = 0; x < textureWidth; x += 1) {
-      const altitudeSine =
-        sinLatitude * sinDeclination + cosLatitude * cosDeclination * longitudeCosines[x];
-      const solarElevation = toDegrees(Math.asin(Math.min(1, Math.max(-1, altitudeSine))));
-      const opacity = getNightOpacity(solarElevation);
-      const [red, green, blue] = getNightColor(solarElevation);
-      const offset = (y * textureWidth + x) * 4;
-
-      pixels[offset] = red;
-      pixels[offset + 1] = green;
-      pixels[offset + 2] = blue;
-      pixels[offset + 3] = Math.round(opacity * 255);
-    }
-  }
-
-  return { width: textureWidth, height: textureHeight, pixels };
+export function getSunDirection(solarPosition) {
+  return getSurfaceVector(solarPosition.latitude, solarPosition.longitude);
 }
 
-export function drawSolarTexture(canvas, solarPosition) {
-  const texture = createSolarTextureData(solarPosition, canvas.width, canvas.height);
-  const context = canvas.getContext("2d", { alpha: true });
-  if (!context) {
-    throw new Error("The browser could not create the solar texture.");
-  }
-
-  const imageData = context.createImageData(texture.width, texture.height);
-  imageData.data.set(texture.pixels);
-  context.putImageData(imageData, 0, 0);
+/** Greenwich mean sidereal time in radians, used to keep the starfield fixed to the sky. */
+export function getSiderealAngle(value = new Date()) {
+  const daysSinceJ2000 = julianDay(validDate(value)) - JULIAN_J2000;
+  return toRadians(normalizeDegrees(280.46061837 + 360.98564736629 * daysSinceJ2000));
 }

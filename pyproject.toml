@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "earth-marker-studio"
-version = "0.4.0"
+version = "0.5.0"
 description = "Python backend and MapLibre frontend for a globe-based OSM point editor"
 readme = "README.md"
 requires-python = ">=3.11"

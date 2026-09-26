@@ -4,7 +4,9 @@ Professional globe-based point editor with:
 
 - Python backend using FastAPI
 - MapLibre GL JS front end with globe projection
-- astronomically accurate live day/night terminator with a smooth solar-elevation twilight gradient
+- astronomically accurate live day/night terminator with a smooth solar-elevation twilight gradient, rendered per pixel on the GPU and covering the poles
+- photographic globe from orbit: NASA Blue Marble imagery, Black Marble city lights at night, sun glint on the oceans, a sun-lit atmosphere, and a sidereal starfield, fading into the vector map as you zoom in
+- smooth frame-synchronised auto-rotation that eases back in after you interact
 - UTC date and time simulation controls for exploring seasonal daylight
 - OSM-derived vector map styling via OpenFreeMap
 - persisted point storage in `data/points.json`
@@ -35,14 +37,16 @@ Professional globe-based point editor with:
 .
 ├── assets/
 │   ├── js/
-│   └── styles/
+│   ├── styles/
+│   └── textures/
 ├── android/
 │   └── app/
 ├── data/
 │   └── points.json
 ├── downloads/
 ├── scripts/
-│   └── build_android.sh
+│   ├── build_android.sh
+│   └── build_globe_textures.py
 ├── src/
 │   └── earth_globe_demo/
 ├── tests/
@@ -139,7 +143,23 @@ Login and pairing each allow ten attempts per client IP per minute. Rate-limit s
 
 This remains a private, single-owner workspace. It does not provide separate user accounts, roles, MFA, or SSO. The local HTTP development workflow is supported; use HTTPS for remote access. If you change the map style or external asset hosts, update the content security policy in `main.py` too.
 
-Point storage uses cross-process file locks on a local filesystem and an atomic JSON replace. Reads cache validated points until the file changes. SQLite connections are explicitly closed after each operation. The globe suspends rotation in hidden tabs, skips unchanged device geometry, and batches solar slider updates into animation frames.
+Point storage uses cross-process file locks on a local filesystem and an atomic JSON replace. Reads cache validated points until the file changes. SQLite connections are explicitly closed after each operation. The globe suspends rotation in hidden tabs, skips unchanged device geometry, and only re-uploads Sun uniforms when the solar slider moves, so scrubbing time is cheap. The map load timeout only runs while the tab is visible, because background tabs receive no animation frames.
+
+## Globe rendering
+
+`assets/js/map/earth-layer.js` is a MapLibre custom WebGL layer drawn above the base map and below labels. While MapLibre renders the globe, it draws a full latitude/longitude sphere (so the polar caps beyond Web Mercator's ±85.05° are lit correctly). Once MapLibre switches to flat rendering at high zoom, it instead shades every screen pixel by intersecting its camera ray with the ground, using a projection re-based on the view centre in float64; a world-spanning mesh cannot be projected precisely enough in float32 at street level and would leave the far edge of pitched views unshaded. Both paths share one lighting function, which blends:
+
+- satellite imagery at low zoom, fading out between zoom 3.2 and 5 in favour of the vector map
+- night shading from the true solar elevation of every pixel, with a warm dusk band and a darker night when seen from orbit
+- city lights that switch on through civil twilight, sampled bicubically from an 8192 px texture (4096 px on GPUs with smaller texture limits); each pixel measures how many CSS pixels one texel covers and the lights are fully gone before that reaches 3, so the ~5 km data is never magnified into a smear
+- a specular sun glint on water, masked to oceans and lakes
+- a ray-marched atmosphere lit by the Sun (so the limb is only bright where it is day), faint night-side airglow, and stars fixed to Greenwich sidereal time
+
+Textures are decoded off the main thread with `createImageBitmap`. The equirectangular textures in `assets/textures` are generated from public-domain sources (NASA Blue Marble Next Generation, NASA Black Marble 2016, Natural Earth 1:50m land and lakes). Rebuild them with:
+
+```bash
+uv run --with pillow python scripts/build_globe_textures.py
+```
 
 ## Quality checks
 
@@ -225,6 +245,6 @@ curl -X PUT http://127.0.0.1:8132/api/points/<point-id> \
 - The browser uses an expiring HttpOnly session cookie. API scripts can continue to use the control key as a Bearer header.
 - Browser geolocation generally requires `https` or `localhost`; insecure remote `http` access may not allow the current-location feature.
 - Location access is requested only after selecting `Find my location`.
-- Attribution is shown in the map UI for OpenFreeMap and OpenStreetMap contributors.
+- Attribution is shown in the map UI for OpenFreeMap, OpenStreetMap contributors, and NASA imagery.
 - Solar calculations run locally in the browser and require no external astronomy service.
 - Writes to `data/points.json` use an atomic replace so interrupted writes cannot leave a partially written JSON document.

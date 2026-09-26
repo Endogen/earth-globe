@@ -66,8 +66,8 @@ class AppSettings:
     title: str = "Earth Marker Studio"
     description: str = "Private globe workspace with saved points and on-demand Android device tracking"
     map_style_url: str = "https://tiles.openfreemap.org/styles/liberty"
-    # The selected style supplies OpenFreeMap / OpenStreetMap attribution.
-    custom_attribution: str = ""
+    # The selected style supplies OpenFreeMap / OpenStreetMap attribution; this credits the globe textures.
+    custom_attribution: str = "Imagery: NASA Blue Marble and Black Marble"
     default_point_color: str = "#ff8d57"
     view: ViewDefaults = ViewDefaults()
     rotation: RotationDefaults = RotationDefaults()

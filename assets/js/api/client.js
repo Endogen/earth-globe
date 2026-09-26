@@ -1,4 +1,4 @@
-import { formatApiErrorDetail } from "../utils/formatters.js?v=0.4.0";
+import { formatApiErrorDetail } from "../utils/formatters.js?v=0.5.0";
 
 const JSON_HEADERS = {
   Accept: "application/json"

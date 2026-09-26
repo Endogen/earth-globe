@@ -1,17 +1,12 @@
-import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js?v=0.4.0";
+import { escapeHtml, formatCoordinates, normalizeCoordinates, normalizeLongitude } from "../utils/formatters.js?v=0.5.0";
 import {
   currentLocationToFeatureCollection,
   emptyFeatureCollection,
   pointsToFeatureCollection,
   trackedDevicesToFeatureCollection
-} from "./geojson.js?v=0.4.0";
-import {
-  drawSolarTexture,
-  getSolarElevation,
-  getSolarPosition,
-  SOLAR_TEXTURE_HEIGHT,
-  SOLAR_TEXTURE_WIDTH
-} from "./solar.js?v=0.4.0";
+} from "./geojson.js?v=0.5.0";
+import { EarthLayer } from "./earth-layer.js?v=0.5.0";
+import { getSolarElevation, getSolarPosition, smoothStep } from "./solar.js?v=0.5.0";
 
 const SOURCE_ID = "points";
 const HALO_LAYER_ID = "points-halo";
@@ -26,10 +21,20 @@ const TRACKED_DEVICE_SOURCE_ID = "tracked-devices";
 const TRACKED_DEVICE_HALO_LAYER_ID = "tracked-devices-halo";
 const TRACKED_DEVICE_CORE_LAYER_ID = "tracked-devices-core";
 const TRACKED_DEVICE_LABEL_LAYER_ID = "tracked-devices-label";
-const SOLAR_SOURCE_ID = "solar-illumination";
-const SOLAR_SHADE_LAYER_ID = "solar-shade";
-const SOLAR_CANVAS_ID = "solar-illumination-canvas";
-const MERCATOR_MAX_LATITUDE = 85.05112878;
+// Seconds for auto-rotation to ease back up to full speed after an interaction.
+const ROTATION_RAMP_SECONDS = 1.6;
+// Longest frame gap that still advances the rotation, so a stalled tab does not jump the globe.
+const MAX_ROTATION_FRAME_MS = 100;
+// Zoom ranges over which low-zoom labels fade in. From orbit the globe reads as a photograph, not an atlas.
+const LABEL_FADE_ZOOMS = {
+  label_country_1: [2.2, 2.8],
+  label_country_2: [2.8, 3.4],
+  label_country_3: [3.3, 3.9],
+  water_name_point_label: [3, 3.6],
+  water_name_line_label: [3.4, 4],
+  label_city_capital: [3.4, 4],
+  label_city: [3.8, 4.4]
+};
 
 function interpolateColor(from, to, amount) {
   const safeAmount = Math.min(1, Math.max(0, amount));
@@ -39,9 +44,12 @@ function interpolateColor(from, to, amount) {
   return `rgb(${fromChannels.map((value, index) => channel(value, toChannels[index])).join(", ")})`;
 }
 
-function smoothStep(minimum, maximum, value) {
-  const position = Math.min(1, Math.max(0, (value - minimum) / (maximum - minimum)));
-  return position * position * (3 - 2 * position);
+/** Degrees of longitude to advance this frame; eases in after a pause and slows as the camera zooms in. */
+export function getRotationStep({ degreesPerSecond, zoom, maxZoom, elapsedMs, rampProgress }) {
+  if (zoom > maxZoom || elapsedMs <= 0) return 0;
+  const zoomFactor = Math.max((maxZoom - zoom) / maxZoom, 0.2);
+  const ramp = smoothStep(0, 1, rampProgress);
+  return degreesPerSecond * zoomFactor * ramp * (Math.min(elapsedMs, MAX_ROTATION_FRAME_MS) / 1000);
 }
 
 export function getWrappedPointCoordinates(points) {
@@ -89,7 +97,10 @@ export class MapController {
     this.rotationMaxZoom = 3.4;
     this.defaultView = null;
     this.userInteracting = false;
-    this.rotationTimer = null;
+    this.rotationFrame = null;
+    this.lastRotationTime = null;
+    this.rotationRamp = 0;
+    this.autoRotating = false;
     this.resumeTimer = null;
     this.popup = null;
     this.popupPointId = null;
@@ -98,19 +109,15 @@ export class MapController {
     this.currentLocation = null;
     this.trackedDevices = [];
     this.solarPosition = getSolarPosition();
-    this.solarCanvas = null;
-    this.solarTextureFrame = null;
-    this.solarDrawFrame = null;
+    this.solarLive = true;
+    this.earthLayer = null;
     this.deviceSourceKey = null;
-    this.visibilityHandler = () => {
-      window.clearTimeout(this.rotationTimer);
-      if (!document.hidden) this.startRotation();
-    };
+    this.visibilityHandler = () => this.startRotation();
   }
 
   async mount(config) {
     if (!window.maplibregl) {
-      throw new Error("MapLibre GL JS failed to load.");
+      throw new Error("MapLibre GL JS failed to load");
     }
 
     this.defaultView = config.initial_view;
@@ -146,25 +153,36 @@ export class MapController {
     });
 
     await new Promise((resolve, reject) => {
+      let timeout = null;
+      // Individual tile errors can recover; give the style a bounded time to load. Background tabs
+      // get no animation frames, so the map cannot load there and the clock only runs while visible.
+      const armTimeout = () => {
+        clearTimeout(timeout);
+        timeout = document.hidden
+          ? null
+          : setTimeout(() => {
+            cleanup();
+            reject(new Error("The map did not load within 20 seconds"));
+          }, 20_000);
+      };
       const cleanup = () => {
         clearTimeout(timeout);
         this.map.off("load", loaded);
+        document.removeEventListener("visibilitychange", armTimeout);
       };
       const loaded = () => { cleanup(); resolve(); };
-      // Individual tile errors can recover; give the style a bounded time to load.
-      const timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error("The map did not load within 20 seconds."));
-      }, 20_000);
+      document.addEventListener("visibilitychange", armTimeout);
+      armTimeout();
       this.map.once("load", loaded);
     });
 
-    this.#installSolarLayers();
+    this.#installEarthLayer();
+    this.#fadeLowZoomLabels();
     this.#installPointLayers();
     this.#installCurrentLocationLayers();
     this.#installTrackedDeviceLayers();
     this.#bindMapInteractions();
-    this.#updateAtmosphere();
+    this.#updateLocalSky();
     document.addEventListener("visibilitychange", this.visibilityHandler);
     this.startRotation();
   }
@@ -193,10 +211,11 @@ export class MapController {
     this.#setTrackedDeviceData(devices);
   }
 
-  setSolarDate(value) {
+  setSolarDate(value, { live = false } = {}) {
     this.solarPosition = getSolarPosition(value);
-    this.#updateSolarTexture();
-    this.#updateAtmosphere();
+    this.solarLive = live;
+    this.earthLayer?.setSun(this.solarPosition, { live });
+    this.#updateLocalSky();
     return this.solarPosition;
   }
 
@@ -304,100 +323,77 @@ export class MapController {
   }
 
   startRotation() {
-    window.clearTimeout(this.rotationTimer);
-    if (!this.rotationEnabled || document.hidden) return;
+    window.cancelAnimationFrame(this.rotationFrame);
+    this.rotationFrame = null;
+    this.lastRotationTime = null;
+    this.rotationRamp = 0;
+    if (!this.map || !this.rotationEnabled || document.hidden) return;
 
-    const tick = () => {
-      if (!this.map) {
+    const step = (time) => {
+      if (!this.map) return;
+      this.rotationFrame = window.requestAnimationFrame(step);
+      const elapsedMs = this.lastRotationTime === null ? 0 : time - this.lastRotationTime;
+      this.lastRotationTime = time;
+
+      if (this.userInteracting || this.dragState || this.map.isEasing() || this.map.isMoving()) {
+        this.rotationRamp = 0;
         return;
       }
 
-      if (this.rotationEnabled && !this.userInteracting && !this.dragState && this.map.getZoom() <= this.rotationMaxZoom) {
-        const center = this.map.getCenter();
-        const zoomFactor = (this.rotationMaxZoom - this.map.getZoom()) / this.rotationMaxZoom;
-        const distancePerTick = (this.rotationDegreesPerSecond * Math.max(zoomFactor, 0.2)) / 2;
+      this.rotationRamp = Math.min(1, this.rotationRamp + Math.min(elapsedMs, MAX_ROTATION_FRAME_MS) / 1000 / ROTATION_RAMP_SECONDS);
+      const degrees = getRotationStep({
+        degreesPerSecond: this.rotationDegreesPerSecond,
+        zoom: this.map.getZoom(),
+        maxZoom: this.rotationMaxZoom,
+        elapsedMs,
+        rampProgress: this.rotationRamp
+      });
+      if (degrees === 0) return;
 
-        this.map.easeTo({
-          center: [center.lng - distancePerTick, center.lat],
-          duration: 450,
-          easing: (value) => value
-        });
+      const center = this.map.getCenter();
+      this.autoRotating = true;
+      try {
+        this.map.jumpTo({ center: [center.lng - degrees, center.lat] });
+      } finally {
+        this.autoRotating = false;
       }
-
-      this.rotationTimer = window.setTimeout(tick, 550);
     };
 
-    tick();
+    this.rotationFrame = window.requestAnimationFrame(step);
   }
 
   destroy() {
-    window.clearTimeout(this.rotationTimer);
+    window.cancelAnimationFrame(this.rotationFrame);
     window.clearTimeout(this.resumeTimer);
-    window.cancelAnimationFrame(this.solarTextureFrame);
-    window.cancelAnimationFrame(this.solarDrawFrame);
     document.removeEventListener("visibilitychange", this.visibilityHandler);
     this.popup?.remove();
     this.map?.remove();
-    this.solarCanvas?.remove();
     this.map = null;
+    this.earthLayer = null;
   }
 
-  #installSolarLayers() {
-    document.getElementById(SOLAR_CANVAS_ID)?.remove();
-    this.solarCanvas = document.createElement("canvas");
-    this.solarCanvas.id = SOLAR_CANVAS_ID;
-    this.solarCanvas.width = SOLAR_TEXTURE_WIDTH;
-    this.solarCanvas.height = SOLAR_TEXTURE_HEIGHT;
-    this.solarCanvas.hidden = true;
-    document.body.append(this.solarCanvas);
-    drawSolarTexture(this.solarCanvas, this.solarPosition);
-
-    this.map.addSource(SOLAR_SOURCE_ID, {
-      type: "canvas",
-      canvas: SOLAR_CANVAS_ID,
-      animate: false,
-      coordinates: [
-        [-180, MERCATOR_MAX_LATITUDE],
-        [180, MERCATOR_MAX_LATITUDE],
-        [180, -MERCATOR_MAX_LATITUDE],
-        [-180, -MERCATOR_MAX_LATITUDE]
-      ]
-    });
-
-    const firstSymbolLayer = this.map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
-    this.map.addLayer(
-      {
-        id: SOLAR_SHADE_LAYER_ID,
-        type: "raster",
-        source: SOLAR_SOURCE_ID,
-        paint: {
-          "raster-opacity": 1,
-          "raster-fade-duration": 0,
-          "raster-resampling": "linear"
-        }
-      },
-      firstSymbolLayer
-    );
+  #installEarthLayer() {
+    // Draw above every base-map fill and line (roads, bridges, borders) but beneath all labels.
+    const layers = this.map.getStyle().layers;
+    const lastBaseIndex = layers.findLastIndex((layer) => layer.type !== "symbol");
+    const beforeId = layers[lastBaseIndex + 1]?.id;
+    this.earthLayer = new EarthLayer({ solarPosition: this.solarPosition, live: this.solarLive });
+    this.map.addLayer(this.earthLayer, beforeId);
   }
 
-  #updateSolarTexture() {
-    if (!this.solarCanvas) {
-      return;
-    }
-
-    window.cancelAnimationFrame(this.solarDrawFrame);
-    this.solarDrawFrame = window.requestAnimationFrame(() => {
-      drawSolarTexture(this.solarCanvas, this.solarPosition);
-      const source = this.map?.getSource(SOLAR_SOURCE_ID);
-      if (!source || typeof source.play !== "function") {
-        this.map?.triggerRepaint();
-        return;
+  #fadeLowZoomLabels() {
+    Object.entries(LABEL_FADE_ZOOMS).forEach(([layerId, [start, end]]) => {
+      const layer = this.map.getLayer(layerId);
+      if (!layer || layer.type !== "symbol") return;
+      const fade = ["interpolate", ["linear"], ["zoom"], start, 0, end, 1];
+      if (this.map.getPaintProperty(layerId, "text-opacity") === undefined) {
+        this.map.setPaintProperty(layerId, "text-opacity", fade);
       }
-
-      window.cancelAnimationFrame(this.solarTextureFrame);
-      source.play();
-      this.map.triggerRepaint();
-      this.solarTextureFrame = window.requestAnimationFrame(() => source.pause());
+      if (this.map.getPaintProperty(layerId, "icon-opacity") === undefined) {
+        this.map.setPaintProperty(layerId, "icon-opacity", fade);
+      }
+      // Hidden labels would still claim collision space, so keep them out of placement entirely.
+      this.map.setLayerZoomRange(layerId, Math.max(layer.minzoom ?? 0, start), layer.maxzoom ?? 24);
     });
   }
 
@@ -659,7 +655,8 @@ export class MapController {
     });
 
     this.map.on("moveend", () => {
-      this.#updateAtmosphere();
+      if (this.autoRotating) return;
+      this.#updateLocalSky();
       window.clearTimeout(this.resumeTimer);
       this.resumeTimer = window.setTimeout(() => {
         if (!this.dragState) {
@@ -690,43 +687,34 @@ export class MapController {
     }
   }
 
-  #updateAtmosphere() {
-    if (!this.map || !this.solarPosition) {
+  #updateLocalSky() {
+    // The orbital atmosphere is drawn per pixel by the Earth layer. MapLibre's sky only shows
+    // above the horizon of pitched close-ups, so it follows the Sun at the view centre.
+    // The Earth layer is only installed once the style has loaded; setSky throws before that.
+    if (!this.earthLayer || !this.map?.setSky || !this.solarPosition) {
       return;
     }
 
     const center = this.map.getCenter();
     const solarElevation = getSolarElevation(this.solarPosition, center.lat, center.lng);
     const daylight = smoothStep(-12, 6, solarElevation);
+    const skyColor = interpolateColor("#020711", "#3f7fc1", daylight);
     const horizonColor = interpolateColor("#071225", "#8ec9de", daylight);
     const fogColor = interpolateColor("#07101e", "#c4e3e9", daylight);
 
-    const atmosphereKey = `${horizonColor}:${fogColor}`;
-    if (this.atmosphereKey === atmosphereKey) return;
-    this.atmosphereKey = atmosphereKey;
+    const skyKey = `${skyColor}:${horizonColor}:${fogColor}`;
+    if (this.skyKey === skyKey) return;
+    this.skyKey = skyKey;
 
-    if (typeof this.map.setSky === "function") {
-      this.map.setSky({
-        "sky-color": "#020711",
-        "horizon-color": horizonColor,
-        "fog-color": fogColor,
-        "sky-horizon-blend": 0.18,
-        "horizon-fog-blend": 0.72,
-        "fog-ground-blend": 0.42,
-        "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0]
-      });
-      return;
-    }
-
-    if (typeof this.map.setFog === "function") {
-      this.map.setFog({
-        color: fogColor,
-        "high-color": horizonColor,
-        "horizon-blend": 0.14,
-        "space-color": "#020711",
-        "star-intensity": 0.45 - daylight * 0.37
-      });
-    }
+    this.map.setSky({
+      "sky-color": skyColor,
+      "horizon-color": horizonColor,
+      "fog-color": fogColor,
+      "sky-horizon-blend": 0.18,
+      "horizon-fog-blend": 0.72,
+      "fog-ground-blend": 0.42,
+      "atmosphere-blend": 0
+    });
   }
 
   #previewDraggedPoint(pointId, latitude, longitude) {

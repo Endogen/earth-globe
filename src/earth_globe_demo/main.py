@@ -42,7 +42,7 @@ def create_app(
         downloads_dir.mkdir(parents=True, exist_ok=True)
         yield
 
-    app = FastAPI(title=settings.title, description=settings.description, version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title=settings.title, description=settings.description, version="0.5.0", lifespan=lifespan)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

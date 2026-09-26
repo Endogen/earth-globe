@@ -1,14 +1,14 @@
-import { ApiClient } from "./api/client.js?v=0.4.0";
-import { LocationService } from "./location/service.js?v=0.4.0";
-import { MapController } from "./map/controller.js?v=0.4.0";
+import { ApiClient } from "./api/client.js?v=0.5.0";
+import { LocationService } from "./location/service.js?v=0.5.0";
+import { MapController } from "./map/controller.js?v=0.5.0";
 import {
   DevicesStore,
   getDeviceRefreshDelay,
   getDeviceRefreshStatus
-} from "./state/devices-store.js?v=0.4.0";
-import { PointsStore } from "./state/points-store.js?v=0.4.0";
-import { UiController } from "./ui/controller.js?v=0.4.0";
-import { formatCoordinates } from "./utils/formatters.js?v=0.4.0";
+} from "./state/devices-store.js?v=0.5.0";
+import { PointsStore } from "./state/points-store.js?v=0.5.0";
+import { UiController } from "./ui/controller.js?v=0.5.0";
+import { formatCoordinates } from "./utils/formatters.js?v=0.5.0";
 
 const apiClient = new ApiClient();
 const locationService = new LocationService();
@@ -126,7 +126,7 @@ ui.bind({
     setSolarLive(enabled);
     ui.setStatus(
       enabled
-        ? "Following the current Sun position and updating once a minute."
+        ? "Following the Sun in real time."
         : "Solar simulation enabled. Choose a UTC date and time to move the terminator."
     );
   },
@@ -408,7 +408,7 @@ function updateSolarCycle(date) {
     return;
   }
 
-  const position = mapController.setSolarDate(date);
+  const position = mapController.setSolarDate(date, { live: solarLive });
   ui.setSolarState({ date: position.date, position, live: solarLive });
 }
 

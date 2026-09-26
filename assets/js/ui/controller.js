@@ -1,4 +1,4 @@
-import { formatCoordinate, formatCoordinates, formatTimestamp } from "../utils/formatters.js?v=0.4.0";
+import { formatCoordinate, formatCoordinates, formatTimestamp } from "../utils/formatters.js?v=0.5.0";
 
 const UTC_DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
